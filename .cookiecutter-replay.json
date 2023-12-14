@@ -1,0 +1,46 @@
+{
+  "cookiecutter": {
+    "Introduction": "",
+    "type": "lib",
+    "name": "client-base",
+    "description": "Utilities for writing Frequenz API clients",
+    "title": "Freqenz Client Base Library",
+    "keywords": "(comma separated: 'frequenz', <type> and <name> are included automatically)",
+    "github_org": "frequenz-floss",
+    "license": "MIT",
+    "author_name": "Frequenz Energy-as-a-Service GmbH",
+    "author_email": "floss@frequenz.com",
+    "python_package": "frequenz.client.base",
+    "pypi_package_name": "frequenz-client-base",
+    "github_repo_name": "frequenz-client-base-python",
+    "default_codeowners": "(like @some-org/some-team; defaults to a team based on the repo type)",
+    "_template": "gh:frequenz-floss/frequenz-repo-config-python",
+    "_repo_dir": "/home/sahas/.cookiecutters/frequenz-repo-config-python/cookiecutter",
+    "_checkout": "v0.7.5"
+  },
+  "_cookiecutter": {
+    "Introduction": "{{cookiecutter | introduction}}",
+    "type": [
+      "actor",
+      "api",
+      "app",
+      "lib",
+      "model"
+    ],
+    "name": null,
+    "description": null,
+    "title": "{{cookiecutter | proj_title}}",
+    "keywords": "(comma separated: 'frequenz', <type> and <name> are included automatically)",
+    "github_org": "frequenz-floss",
+    "license": [
+      "MIT",
+      "Proprietary"
+    ],
+    "author_name": "Frequenz Energy-as-a-Service GmbH",
+    "author_email": "floss@frequenz.com",
+    "python_package": "{{cookiecutter | python_package}}",
+    "pypi_package_name": "{{cookiecutter | pypi_package_name}}",
+    "github_repo_name": "{{cookiecutter | github_repo_name}}",
+    "default_codeowners": "(like @some-org/some-team; defaults to a team based on the repo type)"
+  }
+}
