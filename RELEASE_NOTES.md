@@ -10,7 +10,7 @@
 
 ## New Features
 
-<!-- Here goes the main new features and examples or instructions on how to use them -->
+- Imports retry strategies and the generic grpc streaming helper from the SDK.
 
 ## Bug Fixes
 
