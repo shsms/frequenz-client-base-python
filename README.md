@@ -8,8 +8,6 @@
 
 Utilities for writing Frequenz API clients
 
-TODO(cookiecutter): Improve the README file
-
 ## Supported Platforms
 
 The following platforms are officially supported (tested):
