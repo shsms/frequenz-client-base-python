@@ -2,7 +2,7 @@
 
 ## Summary
 
-First release of the Freqenz Client Base Library, that exposes a retry strategy implementations and a generic grpc streaming helper.
+<!-- Here goes a general summary of what this release is about -->
 
 ## Upgrading
 
@@ -10,7 +10,7 @@ First release of the Freqenz Client Base Library, that exposes a retry strategy 
 
 ## New Features
 
-- Imports retry strategies and the generic grpc streaming helper from the SDK.
+<!-- Here goes the main new features and examples or instructions on how to use them -->
 
 ## Bug Fixes
 
