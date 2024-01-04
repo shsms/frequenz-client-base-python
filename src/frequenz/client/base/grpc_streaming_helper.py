@@ -8,7 +8,7 @@ import logging
 import typing
 
 import grpc
-from grpc.aio import UnaryStreamCall  # type: ignore[import]
+from grpc.aio import UnaryStreamCall
 
 from frequenz import channels
 
