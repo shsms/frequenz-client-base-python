@@ -31,7 +31,7 @@ dependencies = [
   "typing-extensions >= 4.5.0, < 5",
   "grpcio >= 1.54.2, < 2",
   "grpcio-tools >= 1.54.2, < 2",
-  "frequenz-channels >= 0.16.0, < 0.17.0",
+  "frequenz-channels >= v1.0.0-beta.2, < 2",
 ]
 dynamic = ["version"]
 
