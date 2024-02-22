@@ -11,7 +11,8 @@
 ## New Features
 
 * Functions to convert to `datetime` and protobufs `Timestamp` have been added.
+* The generated documentation was improved to include information on defaults and generic parameters.
 
 ## Bug Fixes
 
-<!-- Here goes notable bug fixes that are worth a special mention or explanation -->
+* When copying `RetryStrategy`s, the type now will be correctly set to the original type.
