@@ -3,12 +3,11 @@
 
 """Implementations for retry strategies."""
 
-from __future__ import annotations
-
 import random
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from copy import deepcopy
+from typing import Self
 
 DEFAULT_RETRY_INTERVAL = 3.0
 """Default retry interval, in seconds."""
@@ -52,7 +51,7 @@ class RetryStrategy(ABC):
         """
         self._count = 0
 
-    def copy(self) -> RetryStrategy:
+    def copy(self) -> Self:
         """Create a new instance of `self`.
 
         Returns:
