@@ -2,7 +2,7 @@
 # For details see: https://www.mkdocs.org/user-guide/configuration/
 
 # Project information
-site_name: "Freqenz Client Base Library"
+site_name: "Frequenz Client Base Library"
 site_description: "Utilities for writing Frequenz API clients"
 site_author: "Frequenz Energy-as-a-Service GmbH"
 copyright: "Copyright © 2023 Frequenz Energy-as-a-Service GmbH"

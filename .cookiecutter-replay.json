@@ -4,7 +4,7 @@
     "type": "lib",
     "name": "client-base",
     "description": "Utilities for writing Frequenz API clients",
-    "title": "Freqenz Client Base Library",
+    "title": "Frequenz Client Base Library",
     "keywords": "(comma separated: 'frequenz', <type> and <name> are included automatically)",
     "github_org": "frequenz-floss",
     "license": "MIT",
