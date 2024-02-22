@@ -5,7 +5,7 @@
 
 import asyncio
 import logging
-import typing
+from typing import Any, Callable, Generic, TypeVar
 
 import grpc
 from grpc.aio import UnaryStreamCall
@@ -17,18 +17,21 @@ from . import retry_strategy
 _logger = logging.getLogger(__name__)
 
 
-_InputT = typing.TypeVar("_InputT")
-_OutputT = typing.TypeVar("_OutputT")
+InputT = TypeVar("InputT")
+"""The input type of the stream."""
+
+OutputT = TypeVar("OutputT")
+"""The output type of the stream."""
 
 
-class GrpcStreamingHelper(typing.Generic[_InputT, _OutputT]):
+class GrpcStreamingHelper(Generic[InputT, OutputT]):
     """Helper class to handle grpc streaming methods."""
 
     def __init__(
         self,
         stream_name: str,
-        stream_method: typing.Callable[[], UnaryStreamCall[typing.Any, _InputT]],
-        transform: typing.Callable[[_InputT], _OutputT],
+        stream_method: Callable[[], UnaryStreamCall[Any, InputT]],
+        transform: Callable[[InputT], OutputT],
         retry_spec: retry_strategy.RetryStrategy | None = None,
     ):
         """Initialize the streaming helper.
@@ -48,12 +51,12 @@ class GrpcStreamingHelper(typing.Generic[_InputT, _OutputT]):
             retry_strategy.LinearBackoff() if retry_spec is None else retry_spec.copy()
         )
 
-        self._channel: channels.Broadcast[_OutputT] = channels.Broadcast(
+        self._channel: channels.Broadcast[OutputT] = channels.Broadcast(
             f"GrpcStreamingHelper-{stream_name}"
         )
         self._task = asyncio.create_task(self._run())
 
-    def new_receiver(self, maxsize: int = 50) -> channels.Receiver[_OutputT]:
+    def new_receiver(self, maxsize: int = 50) -> channels.Receiver[OutputT]:
         """Create a new receiver for the stream.
 
         Args:

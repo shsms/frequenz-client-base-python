@@ -3,17 +3,16 @@
 
 """Implementations for retry strategies."""
 
-from __future__ import annotations
-
 import random
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from copy import deepcopy
+from typing import Self
 
-_DEFAULT_RETRY_INTERVAL = 3.0
+DEFAULT_RETRY_INTERVAL = 3.0
 """Default retry interval, in seconds."""
 
-_DEFAULT_RETRY_JITTER = 1.0
+DEFAULT_RETRY_JITTER = 1.0
 """Default retry jitter, in seconds."""
 
 
@@ -52,7 +51,7 @@ class RetryStrategy(ABC):
         """
         self._count = 0
 
-    def copy(self) -> RetryStrategy:
+    def copy(self) -> Self:
         """Create a new instance of `self`.
 
         Returns:
@@ -80,8 +79,8 @@ class LinearBackoff(RetryStrategy):
 
     def __init__(
         self,
-        interval: float = _DEFAULT_RETRY_INTERVAL,
-        jitter: float = _DEFAULT_RETRY_JITTER,
+        interval: float = DEFAULT_RETRY_INTERVAL,
+        jitter: float = DEFAULT_RETRY_JITTER,
         limit: int | None = None,
     ) -> None:
         """Create a `LinearBackoff` instance.
@@ -116,7 +115,7 @@ class LinearBackoff(RetryStrategy):
 class ExponentialBackoff(RetryStrategy):
     """Provides methods for calculating the exponential interval between retries."""
 
-    DEFAULT_INTERVAL = _DEFAULT_RETRY_INTERVAL
+    DEFAULT_INTERVAL = DEFAULT_RETRY_INTERVAL
     """Default retry interval, in seconds."""
 
     DEFAULT_MAX_INTERVAL = 60.0
@@ -131,7 +130,7 @@ class ExponentialBackoff(RetryStrategy):
         initial_interval: float = DEFAULT_INTERVAL,
         max_interval: float = DEFAULT_MAX_INTERVAL,
         multiplier: float = DEFAULT_MULTIPLIER,
-        jitter: float = _DEFAULT_RETRY_JITTER,
+        jitter: float = DEFAULT_RETRY_JITTER,
         limit: int | None = None,
     ) -> None:
         """Create a `ExponentialBackoff` instance.
