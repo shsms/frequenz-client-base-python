@@ -1,4 +1,4 @@
-# Freqenz Client Base Library Release Notes
+# Frequenz Client Base Library Release Notes
 
 ## Summary
 
