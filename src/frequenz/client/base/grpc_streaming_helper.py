@@ -5,7 +5,7 @@
 
 import asyncio
 import logging
-import typing
+from typing import Any, Callable, Generic, TypeVar
 
 import grpc
 from grpc.aio import UnaryStreamCall
@@ -17,21 +17,21 @@ from . import retry_strategy
 _logger = logging.getLogger(__name__)
 
 
-InputT = typing.TypeVar("InputT")
+InputT = TypeVar("InputT")
 """The input type of the stream."""
 
-OutputT = typing.TypeVar("OutputT")
+OutputT = TypeVar("OutputT")
 """The output type of the stream."""
 
 
-class GrpcStreamingHelper(typing.Generic[InputT, OutputT]):
+class GrpcStreamingHelper(Generic[InputT, OutputT]):
     """Helper class to handle grpc streaming methods."""
 
     def __init__(
         self,
         stream_name: str,
-        stream_method: typing.Callable[[], UnaryStreamCall[typing.Any, InputT]],
-        transform: typing.Callable[[InputT], OutputT],
+        stream_method: Callable[[], UnaryStreamCall[Any, InputT]],
+        transform: Callable[[InputT], OutputT],
         retry_spec: retry_strategy.RetryStrategy | None = None,
     ):
         """Initialize the streaming helper.
