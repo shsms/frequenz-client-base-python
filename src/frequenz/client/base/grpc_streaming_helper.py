@@ -7,7 +7,7 @@ import asyncio
 import logging
 from typing import Any, Callable, Generic, TypeVar
 
-import grpc
+import grpc.aio
 from grpc.aio import UnaryStreamCall
 
 from frequenz import channels
