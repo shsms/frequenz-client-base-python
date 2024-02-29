@@ -5,11 +5,7 @@
 
 # pylint: disable=chained-comparison
 
-from frequenz.client.base.retry_strategy import (
-    ExponentialBackoff,
-    LinearBackoff,
-    RetryStrategy,
-)
+from frequenz.client.base.retry import ExponentialBackoff, LinearBackoff, RetryStrategy
 
 
 class TestLinearBackoff:

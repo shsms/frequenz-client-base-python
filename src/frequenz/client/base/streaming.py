@@ -11,7 +11,7 @@ import grpc.aio
 
 from frequenz import channels
 
-from . import retry_strategy
+from . import retry
 
 _logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class GrpcStreamingHelper(Generic[InputT, OutputT]):
         stream_name: str,
         stream_method: Callable[[], grpc.aio.UnaryStreamCall[Any, InputT]],
         transform: Callable[[InputT], OutputT],
-        retry_spec: retry_strategy.RetryStrategy | None = None,
+        retry_spec: retry.RetryStrategy | None = None,
     ):
         """Initialize the streaming helper.
 
@@ -47,7 +47,7 @@ class GrpcStreamingHelper(Generic[InputT, OutputT]):
         self._stream_method = stream_method
         self._transform = transform
         self._retry_spec = (
-            retry_strategy.LinearBackoff() if retry_spec is None else retry_spec.copy()
+            retry.LinearBackoff() if retry_spec is None else retry_spec.copy()
         )
 
         self._channel: channels.Broadcast[OutputT] = channels.Broadcast(
