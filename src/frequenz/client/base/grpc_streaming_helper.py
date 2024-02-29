@@ -8,7 +8,6 @@ import logging
 from typing import Any, Callable, Generic, TypeVar
 
 import grpc.aio
-from grpc.aio import UnaryStreamCall
 
 from frequenz import channels
 
@@ -30,7 +29,7 @@ class GrpcStreamingHelper(Generic[InputT, OutputT]):
     def __init__(
         self,
         stream_name: str,
-        stream_method: Callable[[], UnaryStreamCall[Any, InputT]],
+        stream_method: Callable[[], grpc.aio.UnaryStreamCall[Any, InputT]],
         transform: Callable[[InputT], OutputT],
         retry_spec: retry_strategy.RetryStrategy | None = None,
     ):
