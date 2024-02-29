@@ -23,7 +23,7 @@ OutputT = TypeVar("OutputT")
 """The output type of the stream."""
 
 
-class GrpcStreamingHelper(Generic[InputT, OutputT]):
+class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
     """Helper class to handle grpc streaming methods."""
 
     def __init__(
@@ -51,7 +51,7 @@ class GrpcStreamingHelper(Generic[InputT, OutputT]):
         )
 
         self._channel: channels.Broadcast[OutputT] = channels.Broadcast(
-            f"GrpcStreamingHelper-{stream_name}"
+            f"GrpcStreamBroadcaster-{stream_name}"
         )
         self._task = asyncio.create_task(self._run())
 
