@@ -5,7 +5,7 @@
 
 # pylint: disable=chained-comparison
 
-from frequenz.client.base.retry import ExponentialBackoff, LinearBackoff, RetryStrategy
+from frequenz.client.base import retry
 
 
 class TestLinearBackoff:
@@ -16,48 +16,48 @@ class TestLinearBackoff:
         interval = 3
         jitter = 0
         limit = None
-        retry = LinearBackoff(interval=interval, jitter=jitter, limit=limit)
+        strategy = retry.LinearBackoff(interval=interval, jitter=jitter, limit=limit)
 
         for _ in range(10):
-            assert retry.next_interval() == interval
+            assert strategy.next_interval() == interval
 
     def test_iter(self) -> None:
         """Test iterator."""
-        assert list(LinearBackoff(1, 0, 3)) == [1, 1, 1]
+        assert list(retry.LinearBackoff(1, 0, 3)) == [1, 1, 1]
 
     def test_with_limit(self) -> None:
         """Test limit works."""
         interval = 3
         jitter = 0
         limit = 5
-        retry: RetryStrategy = LinearBackoff(
+        strategy: retry.Strategy = retry.LinearBackoff(
             interval=interval, jitter=jitter, limit=limit
         )
 
         for _ in range(limit):
-            assert retry.next_interval() == interval
-        assert retry.next_interval() is None
+            assert strategy.next_interval() == interval
+        assert strategy.next_interval() is None
 
-        retry.reset()
+        strategy.reset()
         for _ in range(limit - 1):
-            assert retry.next_interval() == interval
-        retry.reset()
+            assert strategy.next_interval() == interval
+        strategy.reset()
         for _ in range(limit):
-            assert retry.next_interval() == interval
-        assert retry.next_interval() is None
+            assert strategy.next_interval() == interval
+        assert strategy.next_interval() is None
 
     def test_with_jitter_no_limit(self) -> None:
         """Test with jitter but no limit."""
         interval = 3
         jitter = 1
         limit = None
-        retry: RetryStrategy = LinearBackoff(
+        strategy: retry.Strategy = retry.LinearBackoff(
             interval=interval, jitter=jitter, limit=limit
         )
 
         prev = 0.0
         for _ in range(5):
-            next_val = retry.next_interval()
+            next_val = strategy.next_interval()
             assert next_val is not None
             assert next_val > interval and next_val < (interval + jitter)
             assert next_val != prev
@@ -68,30 +68,30 @@ class TestLinearBackoff:
         interval = 3
         jitter = 1
         limit = 2
-        retry: RetryStrategy = LinearBackoff(
+        strategy: retry.Strategy = retry.LinearBackoff(
             interval=interval, jitter=jitter, limit=limit
         )
 
         prev = 0.0
         for _ in range(2):
-            next_val = retry.next_interval()
+            next_val = strategy.next_interval()
             assert next_val is not None
             assert next_val > interval and next_val < (interval + jitter)
             assert next_val != prev
             prev = next_val
-        assert retry.next_interval() is None
+        assert strategy.next_interval() is None
 
-        retry.reset()
-        next_val = retry.next_interval()
+        strategy.reset()
+        next_val = strategy.next_interval()
         assert next_val is not None
         assert next_val > interval and next_val < (interval + jitter)
         assert next_val != prev
 
     def test_deep_copy(self) -> None:
         """Test if deep copies are really deep copies."""
-        retry = LinearBackoff(1.0, 0.0, 2)
+        strategy = retry.LinearBackoff(1.0, 0.0, 2)
 
-        copy1 = retry.copy()
+        copy1 = strategy.copy()
         assert copy1.next_interval() == 1.0
         assert copy1.next_interval() == 1.0
         assert copy1.next_interval() is None
@@ -108,29 +108,29 @@ class TestExponentialBackoff:
 
     def test_no_limit(self) -> None:
         """Test base case."""
-        retry = ExponentialBackoff(3, 30, 2, 0.0)
+        strategy = retry.ExponentialBackoff(3, 30, 2, 0.0)
 
-        assert retry.next_interval() == 3.0
-        assert retry.next_interval() == 6.0
-        assert retry.next_interval() == 12.0
-        assert retry.next_interval() == 24.0
-        assert retry.next_interval() == 30.0
-        assert retry.next_interval() == 30.0
+        assert strategy.next_interval() == 3.0
+        assert strategy.next_interval() == 6.0
+        assert strategy.next_interval() == 12.0
+        assert strategy.next_interval() == 24.0
+        assert strategy.next_interval() == 30.0
+        assert strategy.next_interval() == 30.0
 
     def test_with_limit(self) -> None:
         """Test limit works."""
-        retry = ExponentialBackoff(3, jitter=0.0, limit=3)
+        strategy = retry.ExponentialBackoff(3, jitter=0.0, limit=3)
 
-        assert retry.next_interval() == 3.0
-        assert retry.next_interval() == 6.0
-        assert retry.next_interval() == 12.0
-        assert retry.next_interval() is None
+        assert strategy.next_interval() == 3.0
+        assert strategy.next_interval() == 6.0
+        assert strategy.next_interval() == 12.0
+        assert strategy.next_interval() is None
 
     def test_deep_copy(self) -> None:
         """Test if deep copies are really deep copies."""
-        retry = ExponentialBackoff(3.0, 30.0, 2, 0.0, 2)
+        strategy = retry.ExponentialBackoff(3.0, 30.0, 2, 0.0, 2)
 
-        copy1 = retry.copy()
+        copy1 = strategy.copy()
         assert copy1.next_interval() == 3.0
         assert copy1.next_interval() == 6.0
         assert copy1.next_interval() is None
@@ -148,7 +148,7 @@ class TestExponentialBackoff:
         jitter = 1
         multiplier = 2
         limit = None
-        retry: RetryStrategy = ExponentialBackoff(
+        strategy: retry.Strategy = retry.ExponentialBackoff(
             initial_interval=initial_interval,
             max_interval=max_interval,
             multiplier=multiplier,
@@ -158,7 +158,7 @@ class TestExponentialBackoff:
 
         prev = 0.0
         for count in range(5):
-            next_val = retry.next_interval()
+            next_val = strategy.next_interval()
             exp_backoff_interval = initial_interval * multiplier**count
             assert next_val is not None
             assert initial_interval <= next_val <= max_interval
@@ -174,7 +174,7 @@ class TestExponentialBackoff:
         jitter = 1
         multiplier = 2
         limit = 2
-        retry: RetryStrategy = ExponentialBackoff(
+        strategy: retry.Strategy = retry.ExponentialBackoff(
             initial_interval=initial_interval,
             max_interval=max_interval,
             multiplier=multiplier,
@@ -184,7 +184,7 @@ class TestExponentialBackoff:
 
         prev = 0.0
         for count in range(2):
-            next_val = retry.next_interval()
+            next_val = strategy.next_interval()
             exp_backoff_interval = initial_interval * multiplier**count
             assert next_val is not None
             assert initial_interval <= next_val <= max_interval
@@ -192,10 +192,10 @@ class TestExponentialBackoff:
             assert next_val <= min(exp_backoff_interval + jitter, max_interval)
             assert next_val != prev
             prev = next_val
-        assert retry.next_interval() is None
+        assert strategy.next_interval() is None
 
-        retry.reset()
-        next_val = retry.next_interval()
+        strategy.reset()
+        next_val = strategy.next_interval()
         count = 0
         exp_backoff_interval = initial_interval * multiplier**count
         assert next_val is not None
