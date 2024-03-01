@@ -6,22 +6,27 @@
 # For more details on the configuration please see:
 # https://github.com/marketplace/actions/labeler
 
-# TODO(cookiecutter): Add different parts of the source
 # For example:
 #
 # "part:module":
-#   - "src/frequenz/lib/client_base/module/**"
+#   - changed-files:
+#     - any-glob-to-any-file:
+#       - "src/frequenz/lib/client_microgrid/module/**"
 #
 # "part:other":
-#   - "src/frequenz/lib/client_base/other/**"
+#   - changed-files:
+#     - any-glob-to-any-file:
+#       - "src/frequenz/lib/client_microgrid/other/**"
 #
 # # For excluding some files (in this example, label "part:complicated"
 # # everything inside src/ with a .py suffix, except for src/__init__.py)
 # "part:complicated":
-#   - any:
-#       - "src/**/*.py"
 #   - all:
-#       - "!src/__init__.py"
+#     - changed-files:
+#       - any-glob-to-any-file:
+#         - "src/**/*.py"
+#       - all-glob-to-all-file:
+#         - "!src/__init__.py"
 #
 # Please have in mind that that the part:xxx labels need to
 # be created in the GitHub repository.
@@ -51,7 +56,7 @@
       - ".editorconfig"
       - ".git*"
       - ".git*/**"
-      - "docs/*.py"
+      - "docs/_scripts/**"
       - CODEOWNERS
       - MANIFEST.in
       - noxfile.py

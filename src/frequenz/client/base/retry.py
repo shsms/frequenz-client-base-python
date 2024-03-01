@@ -16,7 +16,7 @@ DEFAULT_RETRY_JITTER = 1.0
 """Default retry jitter, in seconds."""
 
 
-class RetryStrategy(ABC):
+class Strategy(ABC):
     """Interface for implementing retry strategies."""
 
     _limit: int | None
@@ -74,7 +74,7 @@ class RetryStrategy(ABC):
             yield interval
 
 
-class LinearBackoff(RetryStrategy):
+class LinearBackoff(Strategy):
     """Provides methods for calculating the interval between retries."""
 
     def __init__(
@@ -112,7 +112,7 @@ class LinearBackoff(RetryStrategy):
         return self._interval + random.uniform(0.0, self._jitter)
 
 
-class ExponentialBackoff(RetryStrategy):
+class ExponentialBackoff(Strategy):
     """Provides methods for calculating the exponential interval between retries."""
 
     DEFAULT_INTERVAL = DEFAULT_RETRY_INTERVAL

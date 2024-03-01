@@ -7,12 +7,11 @@ import asyncio
 import logging
 from typing import Any, Callable, Generic, TypeVar
 
-import grpc
-from grpc.aio import UnaryStreamCall
+import grpc.aio
 
 from frequenz import channels
 
-from . import retry_strategy
+from . import retry
 
 _logger = logging.getLogger(__name__)
 
@@ -24,15 +23,15 @@ OutputT = TypeVar("OutputT")
 """The output type of the stream."""
 
 
-class GrpcStreamingHelper(Generic[InputT, OutputT]):
+class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
     """Helper class to handle grpc streaming methods."""
 
     def __init__(
         self,
         stream_name: str,
-        stream_method: Callable[[], UnaryStreamCall[Any, InputT]],
+        stream_method: Callable[[], grpc.aio.UnaryStreamCall[Any, InputT]],
         transform: Callable[[InputT], OutputT],
-        retry_spec: retry_strategy.RetryStrategy | None = None,
+        retry_strategy: retry.Strategy | None = None,
     ):
         """Initialize the streaming helper.
 
@@ -41,18 +40,18 @@ class GrpcStreamingHelper(Generic[InputT, OutputT]):
             stream_method: A function that returns the grpc stream. This function is
                 called everytime the connection is lost and we want to retry.
             transform: A function to transform the input type to the output type.
-            retry_spec: The retry strategy to use, when the connection is lost. Defaults
+            retry_strategy: The retry strategy to use, when the connection is lost. Defaults
                 to retries every 3 seconds, with a jitter of 1 second, indefinitely.
         """
         self._stream_name = stream_name
         self._stream_method = stream_method
         self._transform = transform
-        self._retry_spec = (
-            retry_strategy.LinearBackoff() if retry_spec is None else retry_spec.copy()
+        self._retry_strategy = (
+            retry.LinearBackoff() if retry_strategy is None else retry_strategy.copy()
         )
 
         self._channel: channels.Broadcast[OutputT] = channels.Broadcast(
-            f"GrpcStreamingHelper-{stream_name}"
+            f"GrpcStreamBroadcaster-{stream_name}"
         )
         self._task = asyncio.create_task(self._run())
 
@@ -93,11 +92,11 @@ class GrpcStreamingHelper(Generic[InputT, OutputT]):
                 _logger.exception(
                     "Error in grpc streaming method: %s", self._stream_name
                 )
-            if interval := self._retry_spec.next_interval():
+            if interval := self._retry_strategy.next_interval():
                 _logger.warning(
                     "`%s`, connection ended, retrying %s in %0.3f seconds.",
                     self._stream_name,
-                    self._retry_spec.get_progress(),
+                    self._retry_strategy.get_progress(),
                     interval,
                 )
                 await asyncio.sleep(interval)
@@ -105,7 +104,7 @@ class GrpcStreamingHelper(Generic[InputT, OutputT]):
                 _logger.warning(
                     "`%s`, connection ended, retry limit exceeded %s.",
                     self._stream_name,
-                    self._retry_spec.get_progress(),
+                    self._retry_strategy.get_progress(),
                 )
                 await self._channel.close()
                 break

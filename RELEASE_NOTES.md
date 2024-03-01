@@ -6,7 +6,17 @@
 
 ## Upgrading
 
-<!-- Here goes notes on how to upgrade from previous versions, including deprecations and what they should be replaced with -->
+The project structure was updated to use more consistent and shorter modules and class names.
+
+* `frequenz.client.base.grpc_streaming_helper` was renamed to `frequenz.client.base.streaming`.
+
+   - The `GrpcStreamingHelper` class was renamed to `GrpcStreamBroadcaster`.
+
+      + The constructor argument `retry_spec` was renamed to `retry_strategy`.
+
+* `frequenz.client.base.retry_strategy` was renamed to `frequenz.client.base.retry`.
+
+   - The `RetryStrategy` class was renamed to `Strategy`.
 
 ## New Features
 

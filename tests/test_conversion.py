@@ -12,7 +12,7 @@ from google.protobuf.timestamp_pb2 import Timestamp
 from hypothesis import given
 from hypothesis import strategies as st
 
-from frequenz.client.base.conversion_helper import to_datetime, to_timestamp
+from frequenz.client.base.conversion import to_datetime, to_timestamp
 
 # Strategy for generating datetime objects
 datetime_strategy = st.datetimes(
