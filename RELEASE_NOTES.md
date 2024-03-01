@@ -2,27 +2,16 @@
 
 ## Summary
 
-This release does a bit of restructuring and renaming of classes and modules. It also adds some new features and fixes some bugs.
+<!-- Here goes a general summary of what this release is about -->
 
 ## Upgrading
 
-The project structure was updated to use more consistent and shorter modules and class names.
-
-* `frequenz.client.base.grpc_streaming_helper` was renamed to `frequenz.client.base.streaming`.
-
-   - The `GrpcStreamingHelper` class was renamed to `GrpcStreamBroadcaster`.
-
-      + The constructor argument `retry_spec` was renamed to `retry_strategy`.
-
-* `frequenz.client.base.retry_strategy` was renamed to `frequenz.client.base.retry`.
-
-   - The `RetryStrategy` class was renamed to `Strategy`.
+<!-- Here goes notes on how to upgrade from previous versions, including deprecations and what they should be replaced with -->
 
 ## New Features
 
-* Functions to convert to `datetime` and protobufs `Timestamp` have been added.
-* The generated documentation was improved to include information on defaults and generic parameters.
+<!-- Here goes the main new features and examples or instructions on how to use them -->
 
 ## Bug Fixes
 
-* When copying `RetryStrategy`s, the type now will be correctly set to the original type.
+<!-- Here goes notable bug fixes that are worth a special mention or explanation -->
