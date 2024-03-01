@@ -2,7 +2,7 @@
 
 ## Summary
 
-<!-- Here goes a general summary of what this release is about -->
+This release does a bit of restructuring and renaming of classes and modules. It also adds some new features and fixes some bugs.
 
 ## Upgrading
 
