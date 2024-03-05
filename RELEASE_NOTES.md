@@ -2,5 +2,16 @@
 
 ## Summary
 
-* The generated docs now show the type of symbol in the table of contents and have cross-linking to the protobuf and channels documentation.
-* The minimum supported version of `protobuf` was downgraded to 4.21.6, so downstream projects having this older version as minimum requirements can still use this release.
+<!-- Here goes a general summary of what this release is about -->
+
+## Upgrading
+
+<!-- Here goes notes on how to upgrade from previous versions, including deprecations and what they should be replaced with -->
+
+## New Features
+
+<!-- Here goes the main new features and examples or instructions on how to use them -->
+
+## Bug Fixes
+
+<!-- Here goes notable bug fixes that are worth a special mention or explanation -->
