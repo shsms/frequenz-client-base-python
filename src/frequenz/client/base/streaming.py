@@ -51,7 +51,7 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
         )
 
         self._channel: channels.Broadcast[OutputT] = channels.Broadcast(
-            f"GrpcStreamBroadcaster-{stream_name}"
+            name=f"GrpcStreamBroadcaster-{stream_name}"
         )
         self._task = asyncio.create_task(self._run())
 
@@ -64,7 +64,7 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
         Returns:
             A new receiver.
         """
-        return self._channel.new_receiver(maxsize=maxsize)
+        return self._channel.new_receiver(limit=maxsize)
 
     async def stop(self) -> None:
         """Stop the streaming helper."""
