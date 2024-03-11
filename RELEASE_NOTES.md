@@ -2,16 +2,9 @@
 
 ## Summary
 
-<!-- Here goes a general summary of what this release is about -->
+This release updates the minimum required `frequenz-channels` version is updated
+to v1.0.0-rc1.  This is a breaking change, because the channels API has changed.
 
 ## Upgrading
 
-<!-- Here goes notes on how to upgrade from previous versions, including deprecations and what they should be replaced with -->
-
-## New Features
-
-<!-- Here goes the main new features and examples or instructions on how to use them -->
-
-## Bug Fixes
-
-<!-- Here goes notable bug fixes that are worth a special mention or explanation -->
+Follow the upgrading instructions from the new channel release: [v1.0.0-rc1](https://github.com/frequenz-floss/frequenz-channels-python/releases/tag/v1.0.0-rc.1).
