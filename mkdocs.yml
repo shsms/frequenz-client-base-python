@@ -10,7 +10,7 @@ repo_name: "frequenz-client-base-python"
 repo_url: "https://github.com/frequenz-floss/frequenz-client-base-python"
 # TODO(cookiecutter): "main" is the GitHub repo default branch, you might want to update it
 # if the project uses a different default branch.
-edit_uri: "edit/main/docs/"
+edit_uri: "edit/v0.x.x/docs/"
 strict: true  # Treat warnings as errors
 
 # Build directories
