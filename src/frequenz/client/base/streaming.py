@@ -5,13 +5,13 @@
 
 import asyncio
 import logging
-from typing import Any, Callable, Generic, TypeVar
-
-import grpc.aio
+from collections.abc import AsyncIterator, Callable
+from typing import Generic, TypeVar
 
 from frequenz import channels
 
 from . import retry
+from ._grpchacks import GrpcioError, GrpclibError
 
 _logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
     def __init__(
         self,
         stream_name: str,
-        stream_method: Callable[[], grpc.aio.UnaryStreamCall[Any, InputT]],
+        stream_method: Callable[[], AsyncIterator[InputT]],
         transform: Callable[[InputT], OutputT],
         retry_strategy: retry.Strategy | None = None,
     ):
@@ -88,7 +88,7 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
                 call = self._stream_method()
                 async for msg in call:
                     await sender.send(self._transform(msg))
-            except grpc.aio.AioRpcError as err:
+            except (GrpcioError, GrpclibError) as err:
                 error = err
             error_str = f"Error: {error}" if error else "Stream exhausted"
             if interval := self._retry_strategy.next_interval():
