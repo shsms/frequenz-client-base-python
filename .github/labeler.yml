@@ -60,3 +60,12 @@
       - CODEOWNERS
       - MANIFEST.in
       - noxfile.py
+
+"part:code":
+  - all:
+    - changed-files:
+      - any-glob-to-any-file:
+        - "src/*.py"
+        - "src/**/*.py"
+      - all-globs-to-all-files:
+        - "!src/**/conftest.py"

@@ -47,6 +47,7 @@ body:
       multiple: true
       options:
         - I don't know (part:❓)
+        - Code (part:code)
         - Documentation (part:docs)
         - Unit, integration and performance tests (part:tests)
         - Build script, CI, dependencies, etc. (part:tooling)
