@@ -6,11 +6,11 @@
 
 ## Upgrading
 
-<!-- Here goes notes on how to upgrade from previous versions, including deprecations and what they should be replaced with -->
+- You should now install the dependency using `frequenz-client-base[grpcio]` (or `frequenz-client-base[grpclib]`) if you want to migrate to `grpclib`).
 
 ## New Features
 
-<!-- Here goes the main new features and examples or instructions on how to use them -->
+- `GrpcStreamBroadcaster` is now compatible with both `grpcio` and `grpclib` implementations of gRPC. Just install `frequenz-client-base[grpcio]` or `frequenz-client-base[grpclib]` to use the desired implementation and everything should work as expected.
 
 ## Bug Fixes
 
