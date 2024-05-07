@@ -82,29 +82,30 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
         sender = self._channel.new_sender()
 
         while True:
-            _logger.debug("Making call to grpc streaming method: %s", self._stream_name)
-
+            error: Exception | None = None
+            _logger.info("%s: starting to stream", self._stream_name)
             try:
                 call = self._stream_method()
                 async for msg in call:
                     await sender.send(self._transform(msg))
-            except grpc.aio.AioRpcError:
-                _logger.exception(
-                    "Error in grpc streaming method: %s", self._stream_name
-                )
+            except grpc.aio.AioRpcError as err:
+                error = err
+            error_str = f"Error: {error}" if error else "Stream exhausted"
             if interval := self._retry_strategy.next_interval():
                 _logger.warning(
-                    "`%s`, connection ended, retrying %s in %0.3f seconds.",
+                    "%s: connection ended, retrying %s in %0.3f seconds. %s.",
                     self._stream_name,
                     self._retry_strategy.get_progress(),
                     interval,
+                    error_str,
                 )
                 await asyncio.sleep(interval)
             else:
-                _logger.warning(
-                    "`%s`, connection ended, retry limit exceeded %s.",
+                _logger.error(
+                    "%s: connection ended, retry limit exceeded (%s), giving up. %s.",
                     self._stream_name,
                     self._retry_strategy.get_progress(),
+                    error_str,
                 )
                 await self._channel.close()
                 break
