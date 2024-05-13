@@ -14,4 +14,4 @@
 
 ## Bug Fixes
 
-<!-- Here goes notable bug fixes that are worth a special mention or explanation -->
+- Fixed retrying for `GrpcStreamBroadcaster` when the retry interval is set to 0 (before it would stop retrying if the interval was set to 0).
