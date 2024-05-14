@@ -6,13 +6,12 @@
 
 ## Upgrading
 
-- You should now install the dependency using `frequenz-client-base[grpcio]` (or `frequenz-client-base[grpclib]`) if you want to migrate to `grpclib`).
+<!-- Here goes notes on how to upgrade from previous versions, including deprecations and what they should be replaced with -->
 
 ## New Features
 
-- `GrpcStreamBroadcaster` is now compatible with both `grpcio` and `grpclib` implementations of gRPC. Just install `frequenz-client-base[grpcio]` or `frequenz-client-base[grpclib]` to use the desired implementation and everything should work as expected.
-- A new module `channel` with a function to parse URIs to create `grpclib` client `Channel` instances.
+<!-- Here goes the main new features and examples or instructions on how to use them -->
 
 ## Bug Fixes
 
-- Fixed retrying for `GrpcStreamBroadcaster` when the retry interval is set to 0 (before it would stop retrying if the interval was set to 0).
+<!-- Here goes notable bug fixes that are worth a special mention or explanation -->
