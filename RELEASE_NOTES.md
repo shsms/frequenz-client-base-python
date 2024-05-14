@@ -11,6 +11,7 @@
 ## New Features
 
 - `GrpcStreamBroadcaster` is now compatible with both `grpcio` and `grpclib` implementations of gRPC. Just install `frequenz-client-base[grpcio]` or `frequenz-client-base[grpclib]` to use the desired implementation and everything should work as expected.
+- A new module `channel` with a function to parse URIs to create `grpclib` client `Channel` instances.
 
 ## Bug Fixes
 

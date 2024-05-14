@@ -142,6 +142,8 @@ disable = [
   "line-too-long",
   "unused-variable",
   "unnecessary-lambda-assignment",
+  # Checked by mypy
+  "no-member",
 ]
 
 [tool.pytest.ini_options]
