@@ -6,11 +6,12 @@
 
 ## Upgrading
 
-<!-- Here goes notes on how to upgrade from previous versions, including deprecations and what they should be replaced with -->
+- `channel.parse_grpc_uri()` takes an extra argument, the channel type (which can be either `grpclib.client.Channel` or `grpcio.aio.Channel`).
 
 ## New Features
 
 - Add a `exception` module to provide client exceptions, including gRPC errors with one subclass per gRPC error status code.
+- `channel.parse_grpc_uri()` can now be used with `grpcio` too.
 
 ## Bug Fixes
 
