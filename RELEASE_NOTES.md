@@ -10,7 +10,7 @@
 
 ## New Features
 
-<!-- Here goes the main new features and examples or instructions on how to use them -->
+- Add a `exception` module to provide client exceptions, including gRPC errors with one subclass per gRPC error status code.
 
 ## Bug Fixes
 
