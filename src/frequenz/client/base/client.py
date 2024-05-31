@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import Any, Generic, Self, TypeVar
 
 from .channel import ChannelT, parse_grpc_uri
+from .exception import ClientNotConnected
 
 StubT = TypeVar("StubT")
 
@@ -53,29 +54,35 @@ class BaseApiClient(abc.ABC, Generic[StubT, ChannelT]):
         return self._server_url
 
     @property
-    def channel(self) -> ChannelT | None:
+    def channel(self) -> ChannelT:
         """The underlying gRPC channel used to communicate with the server.
-
-        If the client is not connected, this property is `None`.
 
         Warning:
             This channel is provided as a last resort for advanced users. It is not
             recommended to use this property directly unless you know what you are
             doing and you don't care about being tied to a specific gRPC library.
+
+        Raises:
+            ClientNotConnected: If the client is not connected to the server.
         """
+        if self._channel is None:
+            raise ClientNotConnected(server_url=self.server_url, operation="channel")
         return self._channel
 
     @property
-    def stub(self) -> StubT | None:
+    def stub(self) -> StubT:
         """The underlying gRPC stub.
-
-        If the client is not connected, this property is `None`.
 
         Warning:
             This stub is provided as a last resort for advanced users. It is not
             recommended to use this property directly unless you know what you are
             doing and you don't care about being tied to a specific gRPC library.
+
+        Raises:
+            ClientNotConnected: If the client is not connected to the server.
         """
+        if self._stub is None:
+            raise ClientNotConnected(server_url=self.server_url, operation="stub")
         return self._stub
 
     @property

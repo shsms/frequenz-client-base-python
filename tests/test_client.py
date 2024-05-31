@@ -11,7 +11,8 @@ import pytest_mock
 
 from frequenz.client.base import _grpchacks
 from frequenz.client.base.channel import ChannelT
-from frequenz.client.base.client import BaseApiClient
+from frequenz.client.base.client import BaseApiClient, StubT
+from frequenz.client.base.exception import ClientNotConnected
 
 
 def _get_full_name(cls: type) -> str:
@@ -20,6 +21,23 @@ def _get_full_name(cls: type) -> str:
 
 def _auto_connect_name(auto_connect: bool) -> str:
     return f"{auto_connect=}"
+
+
+def _assert_is_disconnected(client: BaseApiClient[StubT, ChannelT]) -> None:
+    """Assert that the client is disconnected."""
+    assert not client.is_connected
+
+    with pytest.raises(ClientNotConnected, match=r"") as exc_info:
+        _ = client.channel
+    exc = exc_info.value
+    assert exc.server_url == _DEFAULT_SERVER_URL
+    assert exc.operation == "channel"
+
+    with pytest.raises(ClientNotConnected, match=r"") as exc_info:
+        _ = client.stub
+    exc = exc_info.value
+    assert exc.server_url == _DEFAULT_SERVER_URL
+    assert exc.operation == "stub"
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -84,9 +102,7 @@ def test_base_api_client_init(
         assert client.is_connected
         mocks.create_stub.assert_called_once_with(mocks.channel)
     else:
-        assert client.channel is None
-        assert client.stub is None
-        assert not client.is_connected
+        _assert_is_disconnected(client)
         mocks.parse_grpc_uri.assert_not_called()
         mocks.create_stub.assert_not_called()
 
@@ -154,9 +170,7 @@ async def test_base_api_client_disconnect(
 
     mocks.channel.__aexit__.assert_called_once_with(None, None, None)
     assert client.server_url == _DEFAULT_SERVER_URL
-    assert client.channel is None
-    assert client.stub is None
-    assert not client.is_connected
+    _assert_is_disconnected(client)
 
 
 # Tests for async context manager
@@ -198,6 +212,4 @@ async def test_base_api_client_async_context_manager(
 
     mocks.channel.__aexit__.assert_called_once_with(None, None, None)
     assert client.server_url == _DEFAULT_SERVER_URL
-    assert client.channel is None
-    assert client.stub is None
-    assert not client.is_connected
+    _assert_is_disconnected(client)
