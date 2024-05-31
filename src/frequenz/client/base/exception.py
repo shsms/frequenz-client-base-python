@@ -142,6 +142,24 @@ class ApiClientError(Exception):
         )
 
 
+class ClientNotConnected(ApiClientError):
+    """The client is not connected to the server."""
+
+    def __init__(self, *, server_url: str, operation: str) -> None:
+        """Create a new instance.
+
+        Args:
+            server_url: The URL of the server that returned the error.
+            operation: The operation that caused the error.
+        """
+        super().__init__(
+            server_url=server_url,
+            operation=operation,
+            description="The client is not connected to the server",
+            retryable=True,
+        )
+
+
 class GrpcError(ApiClientError):
     """The gRPC server returned an error with a status code.
 

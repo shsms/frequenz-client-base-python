@@ -12,6 +12,7 @@ import pytest
 
 from frequenz.client.base.exception import (
     ApiClientError,
+    ClientNotConnected,
     DataLoss,
     EntityAlreadyExists,
     EntityNotFound,
@@ -31,6 +32,16 @@ from frequenz.client.base.exception import (
     UnknownError,
     UnrecognizedGrpcStatus,
 )
+
+
+def test_client_not_connected() -> None:
+    """Test the ClientNotConnected exception."""
+    exception = ClientNotConnected(server_url="grpc://localhost", operation="test")
+
+    assert exception.server_url == "grpc://localhost"
+    assert exception.operation == "test"
+    assert exception.description == "The client is not connected to the server"
+    assert exception.is_retryable is True
 
 
 class _GrpcErrorCtor(Protocol):
