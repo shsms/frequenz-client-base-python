@@ -28,7 +28,7 @@ class BaseApiClient(abc.ABC, Generic[StubT, ChannelT]):
         create_stub: Callable[[ChannelT], StubT],
         channel_type: type[ChannelT],
         *,
-        auto_connect: bool = True,
+        connect: bool = True,
     ) -> None:
         """Create an instance and connect to the server.
 
@@ -36,8 +36,8 @@ class BaseApiClient(abc.ABC, Generic[StubT, ChannelT]):
             server_url: The URL of the server to connect to.
             create_stub: A function that creates a stub from a channel.
             channel_type: The type of channel to use.
-            auto_connect: Whether to automatically connect to the server. If `False`, the
-                client will not connect to the server until
+            connect: Whether to connect to the server as soon as a client instance is
+                created. If `False`, the client will not connect to the server until
                 [connect()][frequenz.client.base.client.BaseApiClient.connect] is
                 called.
         """
@@ -46,7 +46,7 @@ class BaseApiClient(abc.ABC, Generic[StubT, ChannelT]):
         self._channel_type: type[ChannelT] = channel_type
         self._channel: ChannelT | None = None
         self._stub: StubT | None = None
-        if auto_connect:
+        if connect:
             self.connect(server_url)
 
     @property

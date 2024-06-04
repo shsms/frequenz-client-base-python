@@ -69,7 +69,7 @@ def create_client_with_mocks(
         server_url=server_url,
         create_stub=mock_create_stub,
         channel_type=channel_type,
-        auto_connect=auto_connect,
+        connect=auto_connect,
     )
     return client, _ClientMocks(
         stub=mock_stub,
