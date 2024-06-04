@@ -4,11 +4,13 @@
 """Base class for API clients."""
 
 import abc
-from collections.abc import Callable
-from typing import Any, Generic, Self, TypeVar
+import inspect
+from collections.abc import Awaitable, Callable
+from typing import Any, Generic, Self, TypeVar, overload
 
+from . import _grpchacks
 from .channel import ChannelT, parse_grpc_uri
-from .exception import ClientNotConnected
+from .exception import ApiClientError, ClientNotConnected
 
 StubT = TypeVar("StubT")
 """The type of the gRPC stub."""
@@ -142,3 +144,80 @@ class BaseApiClient(abc.ABC, Generic[StubT, ChannelT]):
         self._channel = None
         self._stub = None
         return result
+
+
+StubOutT = TypeVar("StubOutT")
+"""The type of the response from a gRPC stub method."""
+
+TransformOutT_co = TypeVar("TransformOutT_co", covariant=True)
+"""The type of the transformed response from a gRPC stub method."""
+
+
+@overload
+async def call_stub_method(
+    client: BaseApiClient[StubT, ChannelT],
+    stub_method: Callable[[], Awaitable[StubOutT]],
+    *,
+    method_name: str | None = None,
+    transform: Callable[[StubOutT], TransformOutT_co],
+) -> TransformOutT_co: ...
+
+
+@overload
+async def call_stub_method(
+    client: BaseApiClient[StubT, ChannelT],
+    stub_method: Callable[[], Awaitable[StubOutT]],
+    *,
+    method_name: str | None = None,
+    transform: None = None,
+) -> StubOutT: ...
+
+
+async def call_stub_method(
+    client: BaseApiClient[StubT, ChannelT],
+    stub_method: Callable[[], Awaitable[StubOutT]],
+    *,
+    method_name: str | None = None,
+    transform: Callable[[StubOutT], TransformOutT_co] | None = None,
+) -> StubOutT | TransformOutT_co:
+    """Call a gRPC stub method and translate errors to API client errors.
+
+    This function is a convenience wrapper around calling a gRPC stub method. It
+    translates gRPC errors to API client errors and optionally transforms the response
+    using a provided function.
+
+    This function is designed to be used with API clients that subclass
+    [BaseApiClient][frequenz.client.base.client.BaseApiClient].
+
+    Args:
+        client: The API client to use.
+        stub_method: The gRPC stub method to call.
+        method_name: The name of the method being called. If not provided, the name of
+            the calling function is used.
+        transform: A function that transforms the response from the gRPC stub method.
+
+    Returns:
+        The response from the gRPC stub method, possibly transformed by the `transform`
+            function if provided.
+
+    Raises:
+        ClientNotConnected: If the client is not connected to the server.
+        GrpcError: If a gRPC error occurs.
+    """
+    if method_name is None:
+        # Get the name of the calling function
+        method_name = inspect.stack()[1][3]
+
+    if not client.is_connected:
+        raise ClientNotConnected(server_url=client.server_url, operation=method_name)
+
+    try:
+        response = await stub_method()
+    except (_grpchacks.GrpclibError, _grpchacks.GrpcioError) as grpclib_error:
+        raise ApiClientError.from_grpc_error(
+            server_url=client.server_url,
+            operation=method_name,
+            grpc_error=grpclib_error,
+        ) from grpclib_error
+
+    return response if transform is None else transform(response)
