@@ -11,6 +11,7 @@ from .channel import ChannelT, parse_grpc_uri
 from .exception import ClientNotConnected
 
 StubT = TypeVar("StubT")
+"""The type of the gRPC stub."""
 
 
 class BaseApiClient(abc.ABC, Generic[StubT, ChannelT]):
