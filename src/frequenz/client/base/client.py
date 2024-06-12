@@ -137,9 +137,7 @@ class BaseApiClient(abc.ABC, Generic[StubT, ChannelT]):
         # Function does not return a value (it only ever returns None)
         # [func-returns-value]
         # See https://github.com/vmagamedov/grpclib/issues/193 for more details.
-        result = await self._channel.__aexit__(  # type: ignore[func-returns-value]
-            _exc_type, _exc_val, _exc_tb
-        )
+        result = await self._channel.__aexit__(_exc_type, _exc_val, _exc_tb)
         self._channel = None
         self._stub = None
         return result

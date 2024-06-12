@@ -27,7 +27,7 @@ aviailable, and the correct symbols will be imported at runtime.
 """
 
 
-from typing import Any, Self
+from typing import Any, AsyncContextManager, Self
 
 __all__ = [
     "GrpcioChannel",
@@ -41,8 +41,14 @@ __all__ = [
 ]
 
 try:
+    import grpclib.client
     from grpclib import GRPCError as GrpclibError
     from grpclib.client import Channel as GrpclibChannel
+
+    def grpclib_create_channel(host: str, port: int, ssl: bool) -> Any:
+        """Create a channel."""
+        return grpclib.client.Channel(host=host, port=port, ssl=ssl)
+
 except ImportError:
 
     class GrpclibError(Exception):  # type: ignore[no-redef]
@@ -85,24 +91,16 @@ try:
     from grpc.aio import Channel as GrpcioChannel
     from grpc.aio import insecure_channel as grpcio_insecure_channel
     from grpc.aio import secure_channel as grpcio_secure_channel
+
+    def grpcio_create_channel(
+        host: str, port: int, ssl: bool
+    ) -> AsyncContextManager[Any]:
+        """Create a channel."""
+        if not ssl:
+            return grpcio_insecure_channel(f"{host}:{port}")
+        return grpcio_secure_channel(f"{host}:{port}", grpcio_ssl_channel_credentials())
+
 except ImportError:
-
-    class GrpcioChannelCredentials:  # type: ignore[no-redef]
-        """A dummy class to avoid import errors.
-
-        This class will never be actually used, as it is only used for catching
-        exceptions from the grpc library. If the grpc library is not installed,
-        this class will never be instantiated.
-        """
-
-    def grpcio_ssl_channel_credentials() -> GrpcioChannelCredentials:  # type: ignore[misc]
-        """Create a dummy function to avoid import errors.
-
-        This function will never be actually used, as it is only used for catching
-        exceptions from the grpc library. If the grpc library is not installed,
-        this function will never be called.
-        """
-        return GrpcioChannelCredentials()
 
     class GrpcioError(Exception):  # type: ignore[no-redef]
         """A dummy class to avoid import errors.
@@ -133,25 +131,8 @@ except ImportError:
             """Exit a context manager."""
             return None
 
-    def grpcio_insecure_channel(  # type: ignore[misc]
-        target: str,  # pylint: disable=unused-argument
-    ) -> GrpcioChannel:
-        """Create a dummy function to avoid import errors.
-
-        This function will never be actually used, as it is only used for catching
-        exceptions from the grpc library. If the grpc library is not installed,
-        this function will never be called.
-        """
-        return GrpcioChannel()
-
-    def grpcio_secure_channel(  # type: ignore[misc]
-        target: str,  # pylint: disable=unused-argument
-        credentials: GrpcioChannelCredentials,  # pylint: disable=unused-argument
-    ) -> GrpcioChannel:
-        """Create a dummy function to avoid import errors.
-
-        This function will never be actually used, as it is only used for catching
-        exceptions from the grpc library. If the grpc library is not installed,
-        this function will never be called.
-        """
+    def grpcio_create_channel(
+        host: str, port: int, ssl: bool  # pylint: disable=unused-argument
+    ) -> AsyncContextManager[Any]:
+        """Create a channel."""
         return GrpcioChannel()

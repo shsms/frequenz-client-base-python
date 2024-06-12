@@ -3,7 +3,7 @@
 
 """Handling of gRPC channels."""
 
-from typing import TypeVar
+from typing import Any, AsyncContextManager, TypeVar, cast
 from urllib.parse import parse_qs, urlparse
 
 from . import _grpchacks
@@ -18,7 +18,7 @@ def _to_bool(value: str) -> bool:
     raise ValueError(f"Invalid boolean value '{value}'")
 
 
-ChannelT = TypeVar("ChannelT", _grpchacks.GrpclibChannel, _grpchacks.GrpcioChannel)
+ChannelT = TypeVar("ChannelT", bound=AsyncContextManager[Any])
 """A `grpclib` or `grpcio` channel type."""
 
 
@@ -80,15 +80,7 @@ def parse_grpc_uri(
     port = parsed_uri.port or default_port
     match channel_type:
         case _grpchacks.GrpcioChannel:
-            target = f"{host}:{port}"
-            return (
-                _grpchacks.grpcio_secure_channel(
-                    target, _grpchacks.grpcio_ssl_channel_credentials()
-                )
-                if ssl
-                else _grpchacks.grpcio_insecure_channel(target)
-            )
+            return cast(ChannelT, _grpchacks.grpcio_create_channel(host, port, ssl))
         case _grpchacks.GrpclibChannel:
-            return _grpchacks.GrpclibChannel(host=host, port=port, ssl=ssl)
-        case _:
-            assert False, "Unexpected channel type: {channel_type}"
+            return cast(ChannelT, _grpchacks.grpclib_create_channel(host, port, ssl))
+    assert False, "Unexpected channel type: {channel_type}"
