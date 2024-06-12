@@ -45,7 +45,7 @@ def test_grpclib_parse_uri_ok(
         ssl: bool
 
     with mock.patch(
-        "frequenz.client.base.channel._grpchacks.GrpclibChannel",
+        "frequenz.client.base.channel._grpchacks.grpclib_create_channel",
         return_value=_FakeChannel(host, port, ssl),
     ):
         channel = parse_grpc_uri(uri, _grpchacks.GrpclibChannel)
