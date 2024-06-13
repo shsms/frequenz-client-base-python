@@ -3,16 +3,19 @@
 
 """Tests for the BaseApiClient class."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from unittest import mock
 
+import grpc.aio
+import grpclib
 import pytest
 import pytest_mock
 
 from frequenz.client.base import _grpchacks
 from frequenz.client.base.channel import ChannelT
-from frequenz.client.base.client import BaseApiClient, StubT
-from frequenz.client.base.exception import ClientNotConnected
+from frequenz.client.base.client import BaseApiClient, StubT, call_stub_method
+from frequenz.client.base.exception import ClientNotConnected, UnknownError
 
 
 def _get_full_name(cls: type) -> str:
@@ -69,7 +72,7 @@ def create_client_with_mocks(
         server_url=server_url,
         create_stub=mock_create_stub,
         channel_type=channel_type,
-        auto_connect=auto_connect,
+        connect=auto_connect,
     )
     return client, _ClientMocks(
         stub=mock_stub,
@@ -213,3 +216,138 @@ async def test_base_api_client_async_context_manager(
     mocks.channel.__aexit__.assert_called_once_with(None, None, None)
     assert client.server_url == _DEFAULT_SERVER_URL
     _assert_is_disconnected(client)
+
+
+def _transform_name(transform: bool) -> str:
+    return "transform" if transform else "no_transform"
+
+
+@pytest.fixture
+def mock_transform() -> mock.MagicMock:
+    """Return a mock transform function."""
+    return mock.MagicMock(name="transform", spec=Callable[[int], int], return_value=2)
+
+
+@pytest.mark.parametrize(
+    "method_name",
+    [None, "method"],
+)
+@pytest.mark.parametrize(
+    "transform",
+    [True, False],
+    ids=_transform_name,
+)
+async def test_call_stub_method_not_connected(
+    method_name: str, transform: bool, mock_transform: mock.MagicMock | None
+) -> None:
+    """Test calling a stub method when the client is not connected."""
+    mock_client = mock.MagicMock(name="client", spec=BaseApiClient)
+    mock_client.is_connected = False
+    mock_client.server_url = "server_url"
+    mock_stub_method = mock.AsyncMock(name="stub_method")
+    if not transform:
+        mock_transform = None
+
+    with pytest.raises(ClientNotConnected) as exc_info:
+        _ = await call_stub_method(
+            mock_client,
+            mock_stub_method,
+            transform=mock_transform,
+            method_name=method_name,
+        )
+    mock_stub_method.assert_not_called()
+    assert exc_info.value.server_url == "server_url"
+    assert exc_info.value.operation == (
+        method_name or "test_call_stub_method_not_connected"
+    )
+    if mock_transform:
+        mock_transform.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "method_name",
+    [None, "method"],
+)
+@pytest.mark.parametrize(
+    "exception",
+    [
+        grpc.aio.AioRpcError(
+            grpc.StatusCode.UNKNOWN,
+            mock.MagicMock(name="initial_metadata"),
+            mock.MagicMock(name="trailing_metadata"),
+            "details",
+            "debug_error_string",
+        ),
+        grpclib.GRPCError(grpclib.Status.UNKNOWN, "message", "details"),
+    ],
+)
+@pytest.mark.parametrize(
+    "transform",
+    [True, False],
+    ids=_transform_name,
+)
+async def test_call_stub_method_exception(
+    method_name: str,
+    exception: Exception,
+    transform: bool,
+    mock_transform: mock.MagicMock | None,
+) -> None:
+    """Test calling a stub method that raises an exception."""
+    mock_client = mock.MagicMock(name="client", spec=BaseApiClient)
+    mock_client.is_connected = True
+    mock_client.server_url = "server_url"
+    mock_stub_method = mock.MagicMock(name="stub_method", side_effect=exception)
+    if not transform:
+        mock_transform = None
+
+    with pytest.raises(UnknownError) as exc_info:
+        _ = await call_stub_method(
+            mock_client,
+            mock_stub_method,
+            transform=mock_transform,
+            method_name=method_name,
+        )
+    mock_stub_method.assert_called_once_with()
+    assert exc_info.value.server_url == "server_url"
+    assert exc_info.value.operation == (
+        method_name or "test_call_stub_method_exception"
+    )
+    assert exc_info.value.__cause__ is exception
+    assert exc_info.value.grpc_error is exception
+    if mock_transform:
+        mock_transform.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "method_name",
+    [None, "method"],
+)
+@pytest.mark.parametrize(
+    "transform",
+    [True, False],
+    ids=_transform_name,
+)
+async def test_call_stub_method_success(
+    method_name: str,
+    transform: bool,
+    mock_transform: mock.MagicMock | None,
+) -> None:
+    """Test calling a stub method that succeeds."""
+    mock_client = mock.MagicMock(name="client", spec=BaseApiClient)
+    mock_client.is_connected = True
+    mock_client.server_url = "server_url"
+    mock_stub_method = mock.AsyncMock(name="stub_method", return_value=1)
+    if not transform:
+        mock_transform = None
+
+    response = await call_stub_method(
+        mock_client,
+        mock_stub_method,
+        transform=mock_transform,
+        method_name=method_name,
+    )
+
+    mock_stub_method.assert_called_once_with()
+    assert response == (2 if transform else 1)
+    if mock_transform:
+        mock_transform.assert_called_once_with(1)
