@@ -4,6 +4,7 @@
 """Test cases for the channel module."""
 
 from dataclasses import dataclass
+from typing import NotRequired, TypedDict
 from unittest import mock
 
 import pytest
@@ -29,12 +30,20 @@ VALID_URLS = [
 ]
 
 
+class _CreateChannelKwargs(TypedDict):
+    default_port: NotRequired[int]
+
+
 @pytest.mark.parametrize("uri, host, port, ssl", VALID_URLS)
+@pytest.mark.parametrize(
+    "default_port", [None, 9090, 1234], ids=lambda x: f"default_port={x}"
+)
 def test_grpclib_parse_uri_ok(
     uri: str,
     host: str,
     port: int,
     ssl: bool,
+    default_port: int | None,
 ) -> None:
     """Test successful parsing of gRPC URIs using grpclib."""
 
@@ -44,24 +53,31 @@ def test_grpclib_parse_uri_ok(
         port: int
         ssl: bool
 
+    kwargs = _CreateChannelKwargs()
+    if default_port is not None:
+        kwargs["default_port"] = default_port
+
+    expected_port = port if f":{port}" in uri or default_port is None else default_port
     with mock.patch(
         "frequenz.client.base.channel._grpchacks.grpclib_create_channel",
         return_value=_FakeChannel(host, port, ssl),
-    ):
-        channel = parse_grpc_uri(uri, _grpchacks.GrpclibChannel)
+    ) as create_channel_mock:
+        channel = parse_grpc_uri(uri, _grpchacks.GrpclibChannel, **kwargs)
 
     assert isinstance(channel, _FakeChannel)
-    assert channel.host == host
-    assert channel.port == port
-    assert channel.ssl == ssl
+    create_channel_mock.assert_called_once_with(host, expected_port, ssl)
 
 
 @pytest.mark.parametrize("uri, host, port, ssl", VALID_URLS)
+@pytest.mark.parametrize(
+    "default_port", [None, 9090, 1234], ids=lambda x: f"default_port={x}"
+)
 def test_grpcio_parse_uri_ok(
     uri: str,
     host: str,
     port: int,
     ssl: bool,
+    default_port: int | None,
 ) -> None:
     """Test successful parsing of gRPC URIs using grpcio."""
     expected_channel = mock.MagicMock(
@@ -70,6 +86,11 @@ def test_grpcio_parse_uri_ok(
     expected_credentials = mock.MagicMock(
         name="mock_credentials", spec=_grpchacks.GrpcioChannel
     )
+    expected_port = port if f":{port}" in uri or default_port is None else default_port
+
+    kwargs = _CreateChannelKwargs()
+    if default_port is not None:
+        kwargs["default_port"] = default_port
 
     with (
         mock.patch(
@@ -85,10 +106,10 @@ def test_grpcio_parse_uri_ok(
             return_value=expected_credentials,
         ) as ssl_channel_credentials_mock,
     ):
-        channel = parse_grpc_uri(uri, _grpchacks.GrpcioChannel)
+        channel = parse_grpc_uri(uri, _grpchacks.GrpcioChannel, **kwargs)
 
     assert channel == expected_channel
-    expected_target = f"{host}:{port}"
+    expected_target = f"{host}:{expected_port}"
     if ssl:
         ssl_channel_credentials_mock.assert_called_once_with()
         secure_channel_mock.assert_called_once_with(
