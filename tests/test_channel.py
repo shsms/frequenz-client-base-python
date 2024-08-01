@@ -12,8 +12,8 @@ from frequenz.client.base import _grpchacks
 from frequenz.client.base.channel import parse_grpc_uri
 
 VALID_URLS = [
-    ("grpc://localhost", "localhost", 9090, False),
-    ("grpc://localhost:1234", "localhost", 1234, False),
+    ("grpc://localhost", "localhost", 9090, True),
+    ("grpc://localhost:1234", "localhost", 1234, True),
     ("grpc://localhost:1234?ssl=true", "localhost", 1234, True),
     ("grpc://localhost:1234?ssl=false", "localhost", 1234, False),
     ("grpc://localhost:1234?ssl=1", "localhost", 1234, True),

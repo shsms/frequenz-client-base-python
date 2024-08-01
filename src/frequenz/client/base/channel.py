@@ -30,7 +30,7 @@ def parse_grpc_uri(
     The URI must have the following format:
 
     ```
-    grpc://hostname[:port][?ssl=false]
+    grpc://hostname[:port][?ssl=true]
     ```
 
     A few things to consider about URI components:
@@ -39,7 +39,7 @@ def parse_grpc_uri(
     - If the port is omitted, the `default_port` is used.
     - If a query parameter is passed many times, the last value is used.
     - The only supported query parameter is `ssl`, which must be a boolean value and
-      defaults to `false`.
+      defaults to `true`.
     - Boolean query parameters can be specified with the following values
       (case-insensitive): `true`, `1`, `on`, `false`, `0`, `off`.
 
@@ -69,7 +69,7 @@ def parse_grpc_uri(
             )
 
     options = {k: v[-1] for k, v in parse_qs(parsed_uri.query).items()}
-    ssl = _to_bool(options.pop("ssl", "false"))
+    ssl = _to_bool(options.pop("ssl", "true"))
     if options:
         raise ValueError(
             f"Unexpected query parameters {options!r} in the URI '{uri}'",
