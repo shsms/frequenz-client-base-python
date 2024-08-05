@@ -23,14 +23,19 @@ ChannelT = TypeVar("ChannelT", bound=AsyncContextManager[Any])
 
 
 def parse_grpc_uri(
-    uri: str, channel_type: type[ChannelT], /, *, default_port: int = 9090
+    uri: str,
+    channel_type: type[ChannelT],
+    /,
+    *,
+    default_port: int = 9090,
+    default_ssl: bool = True,
 ) -> ChannelT:
     """Create a grpclib client channel from a URI.
 
     The URI must have the following format:
 
     ```
-    grpc://hostname[:port][?ssl=false]
+    grpc://hostname[:port][?ssl=<bool>]
     ```
 
     A few things to consider about URI components:
@@ -39,7 +44,7 @@ def parse_grpc_uri(
     - If the port is omitted, the `default_port` is used.
     - If a query parameter is passed many times, the last value is used.
     - The only supported query parameter is `ssl`, which must be a boolean value and
-      defaults to `false`.
+      defaults to the `default_ssl` argument if not present.
     - Boolean query parameters can be specified with the following values
       (case-insensitive): `true`, `1`, `on`, `false`, `0`, `off`.
 
@@ -47,6 +52,7 @@ def parse_grpc_uri(
         uri: The gRPC URI specifying the connection parameters.
         channel_type: The type of channel to create.
         default_port: The default port number to use if the URI does not specify one.
+        default_ssl: The default SSL setting to use if the URI does not specify one.
 
     Returns:
         A grpclib client channel object.
@@ -69,7 +75,8 @@ def parse_grpc_uri(
             )
 
     options = {k: v[-1] for k, v in parse_qs(parsed_uri.query).items()}
-    ssl = _to_bool(options.pop("ssl", "false"))
+    ssl_option = options.pop("ssl", None)
+    ssl = _to_bool(ssl_option) if ssl_option is not None else default_ssl
     if options:
         raise ValueError(
             f"Unexpected query parameters {options!r} in the URI '{uri}'",
