@@ -7,7 +7,8 @@ import re
 from typing import Protocol
 from unittest import mock
 
-import grpclib
+import grpc
+import grpc.aio
 import pytest
 
 from frequenz.client.base.exception import (
@@ -48,11 +49,11 @@ class _GrpcErrorCtor(Protocol):
     """A protocol for the constructor of a subclass of `GrpcErrorCtor`."""
 
     def __call__(
-        self, *, server_url: str, operation: str, grpc_error: grpclib.GRPCError
+        self, *, server_url: str, operation: str, grpc_error: grpc.aio.AioRpcError
     ) -> GrpcError: ...
 
 
-ERROR_TUPLES: list[tuple[type[GrpcError], grpclib.Status, str, bool]] = [
+ERROR_TUPLES: list[tuple[type[GrpcError], grpc.StatusCode, str, bool]] = [
     (
         UnrecognizedGrpcStatus,
         mock.MagicMock(name="unknown_status"),
@@ -61,92 +62,92 @@ ERROR_TUPLES: list[tuple[type[GrpcError], grpclib.Status, str, bool]] = [
     ),
     (
         OperationCancelled,
-        grpclib.Status.CANCELLED,
+        grpc.StatusCode.CANCELLED,
         "The operation was cancelled",
         True,
     ),
     (
         UnknownError,
-        grpclib.Status.UNKNOWN,
+        grpc.StatusCode.UNKNOWN,
         "There was an error that can't be described using other statuses",
         True,
     ),
     (
         InvalidArgument,
-        grpclib.Status.INVALID_ARGUMENT,
+        grpc.StatusCode.INVALID_ARGUMENT,
         "The client specified an invalid argument",
         False,
     ),
     (
         OperationTimedOut,
-        grpclib.Status.DEADLINE_EXCEEDED,
+        grpc.StatusCode.DEADLINE_EXCEEDED,
         "The time limit was exceeded while waiting for the operation to complete",
         True,
     ),
     (
         EntityNotFound,
-        grpclib.Status.NOT_FOUND,
+        grpc.StatusCode.NOT_FOUND,
         "The requested entity was not found",
         True,
     ),
     (
         EntityAlreadyExists,
-        grpclib.Status.ALREADY_EXISTS,
+        grpc.StatusCode.ALREADY_EXISTS,
         "The entity that we attempted to create already exists",
         True,
     ),
     (
         PermissionDenied,
-        grpclib.Status.PERMISSION_DENIED,
+        grpc.StatusCode.PERMISSION_DENIED,
         "The caller does not have permission to execute the specified operation",
         True,
     ),
     (
         ResourceExhausted,
-        grpclib.Status.RESOURCE_EXHAUSTED,
+        grpc.StatusCode.RESOURCE_EXHAUSTED,
         "Some resource has been exhausted (for example per-user quota, disk space, etc.)",
         True,
     ),
     (
         OperationPreconditionFailed,
-        grpclib.Status.FAILED_PRECONDITION,
+        grpc.StatusCode.FAILED_PRECONDITION,
         "The operation was rejected because the system is not in a required state",
         True,
     ),
-    (OperationAborted, grpclib.Status.ABORTED, "The operation was aborted", True),
+    (OperationAborted, grpc.StatusCode.ABORTED, "The operation was aborted", True),
     (
         OperationOutOfRange,
-        grpclib.Status.OUT_OF_RANGE,
+        grpc.StatusCode.OUT_OF_RANGE,
         "The operation was attempted past the valid range",
         True,
     ),
     (
         OperationNotImplemented,
-        grpclib.Status.UNIMPLEMENTED,
+        grpc.StatusCode.UNIMPLEMENTED,
         "The operation is not implemented or not supported/enabled in this service",
         False,
     ),
     (
         InternalError,
-        grpclib.Status.INTERNAL,
+        grpc.StatusCode.INTERNAL,
         "Some invariants expected by the underlying system have been broken",
         True,
     ),
     (
         ServiceUnavailable,
-        grpclib.Status.UNAVAILABLE,
+        grpc.StatusCode.UNAVAILABLE,
         "The service is currently unavailable",
         True,
     ),
     (
         DataLoss,
-        grpclib.Status.DATA_LOSS,
+        grpc.StatusCode.DATA_LOSS,
         "Unrecoverable data loss or corruption",
         False,
     ),
     (
         OperationUnauthenticated,
-        grpclib.Status.UNAUTHENTICATED,
+        grpc.StatusCode.UNAUTHENTICATED,
         "The request does not have valid authentication credentials for the operation",
         False,
     ),
@@ -158,13 +159,17 @@ ERROR_TUPLES: list[tuple[type[GrpcError], grpclib.Status, str, bool]] = [
 )
 def test_grpc_status_error(
     exception_class: _GrpcErrorCtor,
-    grpc_status: grpclib.Status,
+    grpc_status: grpc.StatusCode,
     expected_description: str,
     retryable: bool,
 ) -> None:
     """Test gRPC status errors are correctly created from gRPC errors."""
-    grpc_error = grpclib.GRPCError(
-        grpc_status, "grpc error message", "grpc error details"
+    grpc_error = grpc.aio.AioRpcError(
+        grpc_status,
+        initial_metadata=mock.MagicMock(),
+        trailing_metadata=mock.MagicMock(),
+        debug_error_string="grpc error message",
+        details="grpc error details",
     )
     exception = exception_class(
         server_url="http://testserver",
@@ -182,10 +187,12 @@ def test_grpc_status_error(
 def test_grpc_unknown_status_error() -> None:
     """Test that an UnknownError is created for an unknown gRPC status."""
     expected_description = "Test error"
-    grpc_error = grpclib.GRPCError(
+    grpc_error = grpc.aio.AioRpcError(
         mock.MagicMock(name="unknown_status"),
-        "grpc error message",
-        "grpc error details",
+        initial_metadata=mock.MagicMock(),
+        trailing_metadata=mock.MagicMock(),
+        debug_error_string="grpc error message",
+        details="grpc error details",
     )
     exception = GrpcError(
         server_url="http://testserver",
@@ -222,13 +229,17 @@ def test_client_error() -> None:
 )
 def test_from_grpc_error(
     exception_class: type[GrpcError],
-    grpc_status: grpclib.Status,
+    grpc_status: grpc.StatusCode,
     expected_description: str,
     retryable: bool,
 ) -> None:
     """Test that the from_grpc_error method creates the correct exception."""
-    grpc_error = grpclib.GRPCError(
-        grpc_status, "grpc error message", "grpc error details"
+    grpc_error = grpc.aio.AioRpcError(
+        grpc_status,
+        initial_metadata=mock.MagicMock(),
+        trailing_metadata=mock.MagicMock(),
+        debug_error_string="grpc error details",
+        details="grpc error message",
     )
     with pytest.raises(
         exception_class,

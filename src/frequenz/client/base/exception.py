@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from . import _grpchacks
+import grpc
+from grpc.aio import AioRpcError
 
 
 class ApiClientError(Exception):
@@ -61,7 +62,7 @@ class ApiClientError(Exception):
         *,
         server_url: str,
         operation: str,
-        grpc_error: Exception,
+        grpc_error: AioRpcError,
     ) -> GrpcError:
         """Create an instance of the appropriate subclass from a gRPC error.
 
@@ -80,61 +81,32 @@ class ApiClientError(Exception):
             """A protocol for the constructor of a subclass of `GrpcError`."""
 
             def __call__(
-                self, *, server_url: str, operation: str, grpc_error: Exception
+                self, *, server_url: str, operation: str, grpc_error: AioRpcError
             ) -> GrpcError: ...
 
-        if isinstance(grpc_error, _grpchacks.GrpclibError):
-            import grpclib  # pylint: disable=import-outside-toplevel
+        grpc_status_map: dict[grpc.StatusCode, Ctor] = {
+            grpc.StatusCode.CANCELLED: OperationCancelled,
+            grpc.StatusCode.UNKNOWN: UnknownError,
+            grpc.StatusCode.INVALID_ARGUMENT: InvalidArgument,
+            grpc.StatusCode.DEADLINE_EXCEEDED: OperationTimedOut,
+            grpc.StatusCode.NOT_FOUND: EntityNotFound,
+            grpc.StatusCode.ALREADY_EXISTS: EntityAlreadyExists,
+            grpc.StatusCode.PERMISSION_DENIED: PermissionDenied,
+            grpc.StatusCode.RESOURCE_EXHAUSTED: ResourceExhausted,
+            grpc.StatusCode.FAILED_PRECONDITION: OperationPreconditionFailed,
+            grpc.StatusCode.ABORTED: OperationAborted,
+            grpc.StatusCode.OUT_OF_RANGE: OperationOutOfRange,
+            grpc.StatusCode.UNIMPLEMENTED: OperationNotImplemented,
+            grpc.StatusCode.INTERNAL: InternalError,
+            grpc.StatusCode.UNAVAILABLE: ServiceUnavailable,
+            grpc.StatusCode.DATA_LOSS: DataLoss,
+            grpc.StatusCode.UNAUTHENTICATED: OperationUnauthenticated,
+        }
 
-            grpclib_status_map: dict[grpclib.Status, Ctor] = {
-                grpclib.Status.CANCELLED: OperationCancelled,
-                grpclib.Status.UNKNOWN: UnknownError,
-                grpclib.Status.INVALID_ARGUMENT: InvalidArgument,
-                grpclib.Status.DEADLINE_EXCEEDED: OperationTimedOut,
-                grpclib.Status.NOT_FOUND: EntityNotFound,
-                grpclib.Status.ALREADY_EXISTS: EntityAlreadyExists,
-                grpclib.Status.PERMISSION_DENIED: PermissionDenied,
-                grpclib.Status.RESOURCE_EXHAUSTED: ResourceExhausted,
-                grpclib.Status.FAILED_PRECONDITION: OperationPreconditionFailed,
-                grpclib.Status.ABORTED: OperationAborted,
-                grpclib.Status.OUT_OF_RANGE: OperationOutOfRange,
-                grpclib.Status.UNIMPLEMENTED: OperationNotImplemented,
-                grpclib.Status.INTERNAL: InternalError,
-                grpclib.Status.UNAVAILABLE: ServiceUnavailable,
-                grpclib.Status.DATA_LOSS: DataLoss,
-                grpclib.Status.UNAUTHENTICATED: OperationUnauthenticated,
-            }
-
-            if ctor := grpclib_status_map.get(grpc_error.status):
-                return ctor(
-                    server_url=server_url, operation=operation, grpc_error=grpc_error
-                )
-        elif isinstance(grpc_error, _grpchacks.GrpcioError):
-            import grpc  # pylint: disable=import-outside-toplevel
-
-            grpc_status_map: dict[grpc.StatusCode, Ctor] = {
-                grpc.StatusCode.CANCELLED: OperationCancelled,
-                grpc.StatusCode.UNKNOWN: UnknownError,
-                grpc.StatusCode.INVALID_ARGUMENT: InvalidArgument,
-                grpc.StatusCode.DEADLINE_EXCEEDED: OperationTimedOut,
-                grpc.StatusCode.NOT_FOUND: EntityNotFound,
-                grpc.StatusCode.ALREADY_EXISTS: EntityAlreadyExists,
-                grpc.StatusCode.PERMISSION_DENIED: PermissionDenied,
-                grpc.StatusCode.RESOURCE_EXHAUSTED: ResourceExhausted,
-                grpc.StatusCode.FAILED_PRECONDITION: OperationPreconditionFailed,
-                grpc.StatusCode.ABORTED: OperationAborted,
-                grpc.StatusCode.OUT_OF_RANGE: OperationOutOfRange,
-                grpc.StatusCode.UNIMPLEMENTED: OperationNotImplemented,
-                grpc.StatusCode.INTERNAL: InternalError,
-                grpc.StatusCode.UNAVAILABLE: ServiceUnavailable,
-                grpc.StatusCode.DATA_LOSS: DataLoss,
-                grpc.StatusCode.UNAUTHENTICATED: OperationUnauthenticated,
-            }
-
-            if ctor := grpc_status_map.get(grpc_error.code()):
-                return ctor(
-                    server_url=server_url, operation=operation, grpc_error=grpc_error
-                )
+        if ctor := grpc_status_map.get(grpc_error.code()):
+            return ctor(
+                server_url=server_url, operation=operation, grpc_error=grpc_error
+            )
         return UnrecognizedGrpcStatus(
             server_url=server_url,
             operation=operation,
@@ -215,7 +187,7 @@ class GrpcError(ApiClientError):
         server_url: str,
         operation: str,
         description: str,
-        grpc_error: Exception,
+        grpc_error: AioRpcError,
         retryable: bool,
     ) -> None:
         """Create a new instance.
@@ -224,24 +196,12 @@ class GrpcError(ApiClientError):
             server_url: The URL of the server that returned the error.
             operation: The operation that caused the error.
             description: A human-readable description of the error.
-            grpc_error: The gRPC error originating this exception. This should be either
-                a `grpclib.GRPCError` or a `grpc.aio.AioRpcError` depending on which
-                library is used.
+            grpc_error: The gRPC error originating this exception.
             retryable: Whether retrying the operation might succeed.
         """
-        if isinstance(grpc_error, _grpchacks.GrpcioError):
-            status_name = grpc_error.code().name
-            message = grpc_error.details()
-            details = grpc_error.debug_error_string()
-        elif isinstance(grpc_error, _grpchacks.GrpclibError):
-            status_name = grpc_error.status.name
-            message = grpc_error.message
-            details = grpc_error.details
-        else:
-            assert False, (
-                "GrpcError should only be instantiated with a gRPC error: "
-                "grpclib.GRPCError or grpc.aio.AioRpcError"
-            )
+        status_name = grpc_error.code().name
+        message = grpc_error.details()
+        details = grpc_error.debug_error_string()
         message = f": {message}" if message else ""
         details = f" ({details})" if details else ""
         super().__init__(
@@ -250,48 +210,18 @@ class GrpcError(ApiClientError):
             description=f"{description} <status={status_name}>{message}{details}",
             retryable=retryable,
         )
-        self.description = description
+        self.description: str = description
         """The human-readable description of the error."""
 
-        self.grpc_error = grpc_error
-        """The original gRPC error.
-
-        This is either a `grpclib.GRPCError` or a `grpc.aio.AioRpcError` depending on
-        which library is used. We can't type this correctly if we want this library to
-        work when only one of the libraries is installed.
-
-        Tip:
-            If you need to get this error for a particular library, use the appropriate
-            property:
-
-            - [grpclib_error][frequenz.client.base.exception.GrpcError.grpclib_error]
-              for `grpclib.GRPCError`
-            - [grpcio_error][frequenz.client.base.exception.GrpcError.grpcio_error] for
-              `grpc.aio.AioRpcError`
-        """
-
-    @property
-    def grpclib_error(self) -> _grpchacks.GrpclibError:
-        """The original `grpclib.GRPCError`."""
-        assert isinstance(
-            self.grpc_error, _grpchacks.GrpclibError
-        ), "This property is only available when using the grpclib library"
-        return self.grpc_error
-
-    @property
-    def grpcio_error(self) -> _grpchacks.GrpcioError:
-        """The original `grpc.aio.AioRpcError`."""
-        assert isinstance(
-            self.grpc_error, _grpchacks.GrpcioError
-        ), "This property is only available when using the grpcio library"
-        return self.grpc_error
+        self.grpc_error: AioRpcError = grpc_error
+        """The original gRPC error."""
 
 
 class UnrecognizedGrpcStatus(GrpcError):
     """The gRPC server returned an unrecognized status code."""
 
     def __init__(
-        self, *, server_url: str, operation: str, grpc_error: Exception
+        self, *, server_url: str, operation: str, grpc_error: AioRpcError
     ) -> None:
         """Create a new instance.
 
@@ -313,7 +243,7 @@ class OperationCancelled(GrpcError):
     """The operation was cancelled."""
 
     def __init__(
-        self, *, server_url: str, operation: str, grpc_error: Exception
+        self, *, server_url: str, operation: str, grpc_error: AioRpcError
     ) -> None:
         """Create a new instance.
 
@@ -335,7 +265,7 @@ class UnknownError(GrpcError):
     """There was an error that can't be described using other statuses."""
 
     def __init__(
-        self, *, server_url: str, operation: str, grpc_error: Exception
+        self, *, server_url: str, operation: str, grpc_error: AioRpcError
     ) -> None:
         """Create a new instance.
 
@@ -363,7 +293,7 @@ class InvalidArgument(GrpcError, ValueError):
     """
 
     def __init__(
-        self, *, server_url: str, operation: str, grpc_error: Exception
+        self, *, server_url: str, operation: str, grpc_error: AioRpcError
     ) -> None:
         """Create a new instance.
 
@@ -390,7 +320,7 @@ class OperationTimedOut(GrpcError):
     """
 
     def __init__(
-        self, *, server_url: str, operation: str, grpc_error: Exception
+        self, *, server_url: str, operation: str, grpc_error: AioRpcError
     ) -> None:
         """Create a new instance.
 
@@ -418,7 +348,7 @@ class EntityNotFound(GrpcError):
     """
 
     def __init__(
-        self, *, server_url: str, operation: str, grpc_error: Exception
+        self, *, server_url: str, operation: str, grpc_error: AioRpcError
     ) -> None:
         """Create a new instance.
 
@@ -440,7 +370,7 @@ class EntityAlreadyExists(GrpcError):
     """The entity that we attempted to create already exists."""
 
     def __init__(
-        self, *, server_url: str, operation: str, grpc_error: Exception
+        self, *, server_url: str, operation: str, grpc_error: AioRpcError
     ) -> None:
         """Create a new instance.
 
@@ -470,7 +400,7 @@ class PermissionDenied(GrpcError):
     """
 
     def __init__(
-        self, *, server_url: str, operation: str, grpc_error: Exception
+        self, *, server_url: str, operation: str, grpc_error: AioRpcError
     ) -> None:
         """Create a new instance.
 
@@ -493,7 +423,7 @@ class ResourceExhausted(GrpcError):
     """Some resource has been exhausted (for example per-user quota, disk space, etc.)."""
 
     def __init__(
-        self, *, server_url: str, operation: str, grpc_error: Exception
+        self, *, server_url: str, operation: str, grpc_error: AioRpcError
     ) -> None:
         """Create a new instance.
 
@@ -521,7 +451,7 @@ class OperationPreconditionFailed(GrpcError):
     """
 
     def __init__(
-        self, *, server_url: str, operation: str, grpc_error: Exception
+        self, *, server_url: str, operation: str, grpc_error: AioRpcError
     ) -> None:
         """Create a new instance.
 
@@ -547,7 +477,7 @@ class OperationAborted(GrpcError):
     """
 
     def __init__(
-        self, *, server_url: str, operation: str, grpc_error: Exception
+        self, *, server_url: str, operation: str, grpc_error: AioRpcError
     ) -> None:
         """Create a new instance.
 
@@ -578,7 +508,7 @@ class OperationOutOfRange(GrpcError):
     """
 
     def __init__(
-        self, *, server_url: str, operation: str, grpc_error: Exception
+        self, *, server_url: str, operation: str, grpc_error: AioRpcError
     ) -> None:
         """Create a new instance.
 
@@ -600,7 +530,7 @@ class OperationNotImplemented(GrpcError):
     """The operation is not implemented or not supported/enabled in this service."""
 
     def __init__(
-        self, *, server_url: str, operation: str, grpc_error: Exception
+        self, *, server_url: str, operation: str, grpc_error: AioRpcError
     ) -> None:
         """Create a new instance.
 
@@ -626,7 +556,7 @@ class InternalError(GrpcError):
     """
 
     def __init__(
-        self, *, server_url: str, operation: str, grpc_error: Exception
+        self, *, server_url: str, operation: str, grpc_error: AioRpcError
     ) -> None:
         """Create a new instance.
 
@@ -653,7 +583,7 @@ class ServiceUnavailable(GrpcError):
     """
 
     def __init__(
-        self, *, server_url: str, operation: str, grpc_error: Exception
+        self, *, server_url: str, operation: str, grpc_error: AioRpcError
     ) -> None:
         """Create a new instance.
 
@@ -675,7 +605,7 @@ class DataLoss(GrpcError):
     """Unrecoverable data loss or corruption."""
 
     def __init__(
-        self, *, server_url: str, operation: str, grpc_error: Exception
+        self, *, server_url: str, operation: str, grpc_error: AioRpcError
     ) -> None:
         """Create a new instance.
 
@@ -697,7 +627,7 @@ class OperationUnauthenticated(GrpcError):
     """The request does not have valid authentication credentials for the operation."""
 
     def __init__(
-        self, *, server_url: str, operation: str, grpc_error: Exception
+        self, *, server_url: str, operation: str, grpc_error: AioRpcError
     ) -> None:
         """Create a new instance.
 

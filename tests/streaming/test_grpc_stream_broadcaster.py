@@ -10,7 +10,6 @@ from contextlib import AsyncExitStack
 from unittest import mock
 
 import grpc.aio
-import grpclib
 import pytest
 
 from frequenz.client.base import retry, streaming
@@ -125,44 +124,23 @@ class _NamedMagicMock(mock.MagicMock):
 
 
 @pytest.mark.parametrize("successes", [0, 1, 5])
-@pytest.mark.parametrize(
-    "error_spec",
-    [
-        (
-            grpc.aio.AioRpcError(
-                code=_NamedMagicMock(name="mock grpcio code"),
-                initial_metadata=mock.MagicMock(),
-                trailing_metadata=mock.MagicMock(),
-                details="mock details",
-                debug_error_string="mock debug_error_string",
-            ),
-            "<AioRpcError of RPC that terminated with:\n"
-            "\tstatus = mock grpcio code\n"
-            '\tdetails = "mock details"\n'
-            '\tdebug_error_string = "mock debug_error_string"\n'
-            ">",
-        ),
-        (
-            grpclib.GRPCError(
-                status=_NamedMagicMock(name="mock grpclib status"),
-                message="mock grpclib error",
-                details="mock grpclib details",
-            ),
-            "(mock grpclib status, 'mock grpclib error', 'mock grpclib details')",
-        ),
-    ],
-    ids=["grpcio", "grpclib"],
-)
 async def test_streaming_error(  # pylint: disable=too-many-arguments
     successes: int,
-    error_spec: tuple[Exception, str],
     no_retry: mock.MagicMock,  # pylint: disable=redefined-outer-name
     receiver_ready_event: asyncio.Event,  # pylint: disable=redefined-outer-name
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Test streaming errors."""
     caplog.set_level(logging.INFO)
-    error, expected_error_str = error_spec
+
+    error = grpc.aio.AioRpcError(
+        code=_NamedMagicMock(name="mock grpc code"),
+        initial_metadata=mock.MagicMock(),
+        trailing_metadata=mock.MagicMock(),
+        details="mock details",
+        debug_error_string="mock debug_error_string",
+    )
+
     helper = streaming.GrpcStreamBroadcaster(
         stream_name="test_helper",
         stream_method=lambda: _ErroringAsyncIter(
@@ -193,47 +171,29 @@ async def test_streaming_error(  # pylint: disable=too-many-arguments
             "frequenz.client.base.streaming",
             logging.ERROR,
             "test_helper: connection ended, retry limit exceeded (mock progress), "
-            f"giving up. Error: {expected_error_str}.",
+            "giving up. Error: "
+            "<AioRpcError of RPC that terminated with:\n"
+            "\tstatus = mock grpc code\n"
+            '\tdetails = "mock details"\n'
+            '\tdebug_error_string = "mock debug_error_string"\n'
+            ">.",
         ),
     ]
 
 
-@pytest.mark.parametrize(
-    "error_spec",
-    [
-        (
-            grpc.aio.AioRpcError(
-                code=_NamedMagicMock(name="mock grpcio code"),
-                initial_metadata=mock.MagicMock(),
-                trailing_metadata=mock.MagicMock(),
-                details="mock details",
-                debug_error_string="mock debug_error_string",
-            ),
-            "<AioRpcError of RPC that terminated with:\n"
-            "\tstatus = mock grpcio code\n"
-            '\tdetails = "mock details"\n'
-            '\tdebug_error_string = "mock debug_error_string"\n'
-            ">",
-        ),
-        (
-            grpclib.GRPCError(
-                status=_NamedMagicMock(name="mock grpclib status"),
-                message="mock grpclib error",
-                details="mock grpclib details",
-            ),
-            "(mock grpclib status, 'mock grpclib error', 'mock grpclib details')",
-        ),
-    ],
-    ids=["grpcio", "grpclib"],
-)
 async def test_retry_next_interval_zero(  # pylint: disable=too-many-arguments
-    error_spec: tuple[Exception, str],
     receiver_ready_event: asyncio.Event,  # pylint: disable=redefined-outer-name
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Test retry logic when next_interval returns 0."""
     caplog.set_level(logging.WARNING)
-    error, expected_error_str = error_spec
+    error = grpc.aio.AioRpcError(
+        code=_NamedMagicMock(name="mock grpcio code"),
+        initial_metadata=mock.MagicMock(),
+        trailing_metadata=mock.MagicMock(),
+        details="mock details",
+        debug_error_string="mock debug_error_string",
+    )
     mock_retry = mock.MagicMock(spec=retry.Strategy)
     mock_retry.next_interval.side_effect = [0, None]
     mock_retry.copy.return_value = mock_retry
@@ -256,6 +216,13 @@ async def test_retry_next_interval_zero(  # pylint: disable=too-many-arguments
 
     assert not items
     assert mock_retry.next_interval.mock_calls == [mock.call(), mock.call()]
+    expected_error_str = (
+        "<AioRpcError of RPC that terminated with:\n"
+        "\tstatus = mock grpcio code\n"
+        '\tdetails = "mock details"\n'
+        '\tdebug_error_string = "mock debug_error_string"\n'
+        ">"
+    )
     assert caplog.record_tuples == [
         (
             "frequenz.client.base.streaming",
