@@ -8,15 +8,16 @@ import inspect
 from collections.abc import Awaitable, Callable
 from typing import Any, Generic, Self, TypeVar, overload
 
-from . import _grpchacks
-from .channel import ChannelT, parse_grpc_uri
+from grpc.aio import AioRpcError, Channel
+
+from .channel import parse_grpc_uri
 from .exception import ApiClientError, ClientNotConnected
 
 StubT = TypeVar("StubT")
 """The type of the gRPC stub."""
 
 
-class BaseApiClient(abc.ABC, Generic[StubT, ChannelT]):
+class BaseApiClient(abc.ABC, Generic[StubT]):
     """A base class for API clients.
 
     This class provides a common interface for API clients that communicate with a API
@@ -37,7 +38,6 @@ class BaseApiClient(abc.ABC, Generic[StubT, ChannelT]):
 
         ```python
         from collections.abc import AsyncIterable
-        import grpc
         from frequenz.client.base.client import BaseApiClient, call_stub_method
         from frequenz.client.base.streaming import GrpcStreamBroadcaster
         from frequenz.channels import Receiver
@@ -65,10 +65,10 @@ class BaseApiClient(abc.ABC, Generic[StubT, ChannelT]):
             def __init__(self, response: ExampleResponse):
                 self.transformed_value = f"{response.float_value:.2f}"
 
-        class MyApiClient(BaseApiClient[ExampleStub, grpc.Channel]):
+        class MyApiClient(BaseApiClient[ExampleStub]):
             def __init__(self, server_url: str, *, connect: bool = True):
                 super().__init__(
-                    server_url, ExampleStub, grpc.Channel, connect=connect
+                    server_url, ExampleStub, connect=connect
                 )
                 self._broadcaster = GrpcStreamBroadcaster(
                     "stream",
@@ -104,8 +104,6 @@ class BaseApiClient(abc.ABC, Generic[StubT, ChannelT]):
         ```
 
         !!! Note
-            * This example uses `grpcio` as the underlaying gRPC library, but `grpclib`
-                can be used as well.
             * In this case a very simple `GrpcStreamBroadcaster` is used, asuming that
                 each call to `example_stream` will stream the same data. If the request
                 is more complex, you will probably need to have some kind of map from
@@ -116,8 +114,7 @@ class BaseApiClient(abc.ABC, Generic[StubT, ChannelT]):
     def __init__(
         self,
         server_url: str,
-        create_stub: Callable[[ChannelT], StubT],
-        channel_type: type[ChannelT],
+        create_stub: Callable[[Channel], StubT],
         *,
         connect: bool = True,
     ) -> None:
@@ -126,16 +123,14 @@ class BaseApiClient(abc.ABC, Generic[StubT, ChannelT]):
         Args:
             server_url: The URL of the server to connect to.
             create_stub: A function that creates a stub from a channel.
-            channel_type: The type of channel to use.
             connect: Whether to connect to the server as soon as a client instance is
                 created. If `False`, the client will not connect to the server until
                 [connect()][frequenz.client.base.client.BaseApiClient.connect] is
                 called.
         """
         self._server_url: str = server_url
-        self._create_stub: Callable[[ChannelT], StubT] = create_stub
-        self._channel_type: type[ChannelT] = channel_type
-        self._channel: ChannelT | None = None
+        self._create_stub: Callable[[Channel], StubT] = create_stub
+        self._channel: Channel | None = None
         self._stub: StubT | None = None
         if connect:
             self.connect(server_url)
@@ -146,7 +141,7 @@ class BaseApiClient(abc.ABC, Generic[StubT, ChannelT]):
         return self._server_url
 
     @property
-    def channel(self) -> ChannelT:
+    def channel(self) -> Channel:
         """The underlying gRPC channel used to communicate with the server.
 
         Warning:
@@ -197,7 +192,7 @@ class BaseApiClient(abc.ABC, Generic[StubT, ChannelT]):
             self._server_url = server_url
         elif self.is_connected:
             return
-        self._channel = parse_grpc_uri(self._server_url, self._channel_type)
+        self._channel = parse_grpc_uri(self._server_url)
         self._stub = self._create_stub(self._channel)
 
     async def disconnect(self) -> None:
@@ -221,14 +216,6 @@ class BaseApiClient(abc.ABC, Generic[StubT, ChannelT]):
         """Exit a context manager."""
         if self._channel is None:
             return None
-        # We need to ignore the return type here because the __aexit__ method of grpclib
-        # is not annotated correctly, it is annotated to return None but __aexit__
-        # should return a bool | None. This should be harmless if grpclib never handle
-        # any exceptions in __aexit__, so it is just a type checker issue. This is the
-        # error produced by mypy:
-        # Function does not return a value (it only ever returns None)
-        # [func-returns-value]
-        # See https://github.com/vmagamedov/grpclib/issues/193 for more details.
         result = await self._channel.__aexit__(_exc_type, _exc_val, _exc_tb)
         self._channel = None
         self._stub = None
@@ -244,7 +231,7 @@ TransformOutT_co = TypeVar("TransformOutT_co", covariant=True)
 
 @overload
 async def call_stub_method(
-    client: BaseApiClient[StubT, ChannelT],
+    client: BaseApiClient[StubT],
     stub_method: Callable[[], Awaitable[StubOutT]],
     *,
     method_name: str | None = None,
@@ -254,7 +241,7 @@ async def call_stub_method(
 
 @overload
 async def call_stub_method(
-    client: BaseApiClient[StubT, ChannelT],
+    client: BaseApiClient[StubT],
     stub_method: Callable[[], Awaitable[StubOutT]],
     *,
     method_name: str | None = None,
@@ -263,7 +250,7 @@ async def call_stub_method(
 
 
 async def call_stub_method(
-    client: BaseApiClient[StubT, ChannelT],
+    client: BaseApiClient[StubT],
     stub_method: Callable[[], Awaitable[StubOutT]],
     *,
     method_name: str | None = None,
@@ -302,11 +289,9 @@ async def call_stub_method(
 
     try:
         response = await stub_method()
-    except (_grpchacks.GrpclibError, _grpchacks.GrpcioError) as grpclib_error:
+    except AioRpcError as grpc_error:
         raise ApiClientError.from_grpc_error(
-            server_url=client.server_url,
-            operation=method_name,
-            grpc_error=grpclib_error,
-        ) from grpclib_error
+            server_url=client.server_url, operation=method_name, grpc_error=grpc_error
+        ) from grpc_error
 
     return response if transform is None else transform(response)

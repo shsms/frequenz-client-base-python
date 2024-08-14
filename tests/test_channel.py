@@ -3,13 +3,13 @@
 
 """Test cases for the channel module."""
 
-from dataclasses import dataclass
 from typing import NotRequired, TypedDict
 from unittest import mock
 
 import pytest
+from grpc import ssl_channel_credentials
+from grpc.aio import Channel
 
-from frequenz.client.base import _grpchacks
 from frequenz.client.base.channel import parse_grpc_uri
 
 VALID_URLS = [
@@ -42,49 +42,7 @@ class _CreateChannelKwargs(TypedDict):
 @pytest.mark.parametrize(
     "default_ssl", [None, True, False], ids=lambda x: f"default_ssl={x}"
 )
-def test_grpclib_parse_uri_ok(  # pylint: disable=too-many-arguments
-    uri: str,
-    host: str,
-    port: int,
-    ssl: bool,
-    default_port: int | None,
-    default_ssl: bool | None,
-) -> None:
-    """Test successful parsing of gRPC URIs using grpclib."""
-
-    @dataclass(frozen=True)
-    class _FakeChannel:
-        host: str
-        port: int
-        ssl: bool
-
-    kwargs = _CreateChannelKwargs()
-    if default_port is not None:
-        kwargs["default_port"] = default_port
-    if default_ssl is not None:
-        kwargs["default_ssl"] = default_ssl
-
-    expected_port = port if f":{port}" in uri or default_port is None else default_port
-    expected_ssl = ssl if "ssl" in uri or default_ssl is None else default_ssl
-
-    with mock.patch(
-        "frequenz.client.base.channel._grpchacks.grpclib_create_channel",
-        return_value=_FakeChannel(host, port, ssl),
-    ) as create_channel_mock:
-        channel = parse_grpc_uri(uri, _grpchacks.GrpclibChannel, **kwargs)
-
-    assert isinstance(channel, _FakeChannel)
-    create_channel_mock.assert_called_once_with(host, expected_port, expected_ssl)
-
-
-@pytest.mark.parametrize("uri, host, port, ssl", VALID_URLS)
-@pytest.mark.parametrize(
-    "default_port", [None, 9090, 1234], ids=lambda x: f"default_port={x}"
-)
-@pytest.mark.parametrize(
-    "default_ssl", [None, True, False], ids=lambda x: f"default_ssl={x}"
-)
-def test_grpcio_parse_uri_ok(  # pylint: disable=too-many-arguments,too-many-locals
+def test_parse_uri_ok(  # pylint: disable=too-many-arguments,too-many-locals
     uri: str,
     host: str,
     port: int,
@@ -93,11 +51,9 @@ def test_grpcio_parse_uri_ok(  # pylint: disable=too-many-arguments,too-many-loc
     default_ssl: bool | None,
 ) -> None:
     """Test successful parsing of gRPC URIs using grpcio."""
-    expected_channel = mock.MagicMock(
-        name="mock_channel", spec=_grpchacks.GrpcioChannel
-    )
+    expected_channel = mock.MagicMock(name="mock_channel", spec=Channel)
     expected_credentials = mock.MagicMock(
-        name="mock_credentials", spec=_grpchacks.GrpcioChannel
+        name="mock_credentials", spec=ssl_channel_credentials
     )
     expected_port = port if f":{port}" in uri or default_port is None else default_port
     expected_ssl = ssl if "ssl" in uri or default_ssl is None else default_ssl
@@ -110,19 +66,19 @@ def test_grpcio_parse_uri_ok(  # pylint: disable=too-many-arguments,too-many-loc
 
     with (
         mock.patch(
-            "frequenz.client.base.channel._grpchacks.grpcio_insecure_channel",
+            "frequenz.client.base.channel.insecure_channel",
             return_value=expected_channel,
         ) as insecure_channel_mock,
         mock.patch(
-            "frequenz.client.base.channel._grpchacks.grpcio_secure_channel",
+            "frequenz.client.base.channel.secure_channel",
             return_value=expected_channel,
         ) as secure_channel_mock,
         mock.patch(
-            "frequenz.client.base.channel._grpchacks.grpcio_ssl_channel_credentials",
+            "frequenz.client.base.channel.ssl_channel_credentials",
             return_value=expected_credentials,
         ) as ssl_channel_credentials_mock,
     ):
-        channel = parse_grpc_uri(uri, _grpchacks.GrpcioChannel, **kwargs)
+        channel = parse_grpc_uri(uri, **kwargs)
 
     assert channel == expected_channel
     expected_target = f"{host}:{expected_port}"
@@ -158,14 +114,10 @@ INVALID_URLS = [
 
 
 @pytest.mark.parametrize("uri, error_msg", INVALID_URLS)
-@pytest.mark.parametrize(
-    "channel_type", [_grpchacks.GrpclibChannel, _grpchacks.GrpcioChannel], ids=str
-)
-def test_grpclib_parse_uri_error(
+def test_parse_uri_error(
     uri: str,
     error_msg: str,
-    channel_type: type,
 ) -> None:
     """Test parsing of invalid gRPC URIs for grpclib."""
     with pytest.raises(ValueError, match=error_msg):
-        parse_grpc_uri(uri, channel_type)
+        parse_grpc_uri(uri)

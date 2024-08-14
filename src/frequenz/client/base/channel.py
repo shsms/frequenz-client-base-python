@@ -3,10 +3,10 @@
 
 """Handling of gRPC channels."""
 
-from typing import Any, AsyncContextManager, TypeVar, cast
 from urllib.parse import parse_qs, urlparse
 
-from . import _grpchacks
+from grpc import ssl_channel_credentials
+from grpc.aio import Channel, insecure_channel, secure_channel
 
 
 def _to_bool(value: str) -> bool:
@@ -18,19 +18,14 @@ def _to_bool(value: str) -> bool:
     raise ValueError(f"Invalid boolean value '{value}'")
 
 
-ChannelT = TypeVar("ChannelT", bound=AsyncContextManager[Any])
-"""A `grpclib` or `grpcio` channel type."""
-
-
 def parse_grpc_uri(
     uri: str,
-    channel_type: type[ChannelT],
     /,
     *,
     default_port: int = 9090,
     default_ssl: bool = True,
-) -> ChannelT:
-    """Create a grpclib client channel from a URI.
+) -> Channel:
+    """Create a client channel from a URI.
 
     The URI must have the following format:
 
@@ -50,12 +45,11 @@ def parse_grpc_uri(
 
     Args:
         uri: The gRPC URI specifying the connection parameters.
-        channel_type: The type of channel to create.
         default_port: The default port number to use if the URI does not specify one.
         default_ssl: The default SSL setting to use if the URI does not specify one.
 
     Returns:
-        A grpclib client channel object.
+        A client channel object.
 
     Raises:
         ValueError: If the URI is invalid or contains unexpected components.
@@ -85,9 +79,7 @@ def parse_grpc_uri(
 
     host = parsed_uri.hostname
     port = parsed_uri.port or default_port
-    match channel_type:
-        case _grpchacks.GrpcioChannel:
-            return cast(ChannelT, _grpchacks.grpcio_create_channel(host, port, ssl))
-        case _grpchacks.GrpclibChannel:
-            return cast(ChannelT, _grpchacks.grpclib_create_channel(host, port, ssl))
-    assert False, "Unexpected channel type: {channel_type}"
+    target = f"{host}:{port}"
+    if ssl:
+        return secure_channel(target, ssl_channel_credentials())
+    return insecure_channel(target)

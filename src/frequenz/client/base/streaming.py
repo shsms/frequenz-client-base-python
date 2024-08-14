@@ -8,10 +8,11 @@ import logging
 from collections.abc import AsyncIterator, Callable
 from typing import Generic, TypeVar
 
+import grpc.aio
+
 from frequenz import channels
 
 from . import retry
-from ._grpchacks import GrpcioError, GrpclibError
 
 _logger = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
                 call = self._stream_method()
                 async for msg in call:
                     await sender.send(self._transform(msg))
-            except (GrpcioError, GrpclibError) as err:
+            except grpc.aio.AioRpcError as err:
                 error = err
             error_str = f"Error: {error}" if error else "Stream exhausted"
             interval = self._retry_strategy.next_interval()
