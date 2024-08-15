@@ -73,8 +73,9 @@ def parse_grpc_uri(
     ssl_option = options.pop("ssl", None)
     ssl = _to_bool(ssl_option) if ssl_option is not None else default_ssl
     if options:
+        names = ", ".join(options)
         raise ValueError(
-            f"Unexpected query parameters {options!r} in the URI '{uri}'",
+            f"Unexpected query parameters [{names}] in the URI '{uri}'",
             uri,
         )
 

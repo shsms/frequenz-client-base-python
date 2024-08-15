@@ -108,7 +108,7 @@ INVALID_URLS = [
     ),
     (
         "grpc://localhost:1234?ssl=1&ffl=true",
-        "Unexpected query parameters {'ffl': 'true'}",
+        r"Unexpected query parameters \[ffl\]",
     ),
 ]
 
