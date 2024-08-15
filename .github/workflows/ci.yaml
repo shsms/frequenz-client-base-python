@@ -41,6 +41,9 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+      - name: Setup Git
+        uses: frequenz-floss/gh-action-setup-git@v0.x.x
+
       - name: Print environment (debug)
         run: env
 
@@ -119,6 +122,9 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+      - name: Setup Git
+        uses: frequenz-floss/gh-action-setup-git@v0.x.x
+
       - name: Fetch sources
         uses: actions/checkout@v4
         with:
@@ -219,6 +225,9 @@ jobs:
     name: Build distribution packages
     runs-on: ubuntu-20.04
     steps:
+      - name: Setup Git
+        uses: frequenz-floss/gh-action-setup-git@v0.x.x
+
       - name: Fetch sources
         uses: actions/checkout@v4
         with:
@@ -251,17 +260,29 @@ jobs:
     needs: ["build"]
     runs-on: ubuntu-20.04
     steps:
+      - name: Setup Git
+        uses: frequenz-floss/gh-action-setup-git@v0.x.x
+
       - name: Fetch sources
         uses: actions/checkout@v4
+
       - name: Download package
         uses: actions/download-artifact@v4
         with:
           name: dist-packages
           path: dist
+
+      - name: Make Git credentials available to docker
+        run: |
+          touch ~/.git-credentials  # Ensure the file exists
+          cp ~/.git-credentials git-credentials || true
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
+
       - name: Set up docker-buildx
         uses: docker/setup-buildx-action@v3
+
       - name: Test Installation
         uses: docker/build-push-action@v6
         with:
@@ -276,13 +297,13 @@ jobs:
     if: github.event_name != 'push'
     runs-on: ubuntu-20.04
     steps:
+      - name: Setup Git
+        uses: frequenz-floss/gh-action-setup-git@v0.x.x
+
       - name: Fetch sources
         uses: actions/checkout@v4
         with:
           submodules: true
-
-      - name: Setup Git user and e-mail
-        uses: frequenz-floss/setup-git-user@v2
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -318,13 +339,13 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Setup Git
+        uses: frequenz-floss/gh-action-setup-git@v0.x.x
+
       - name: Fetch sources
         uses: actions/checkout@v4
         with:
           submodules: true
-
-      - name: Setup Git user and e-mail
-        uses: frequenz-floss/setup-git-user@v2
 
       - name: Set up Python
         uses: actions/setup-python@v5
