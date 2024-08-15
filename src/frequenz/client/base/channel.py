@@ -3,6 +3,7 @@
 
 """Handling of gRPC channels."""
 
+import dataclasses
 from urllib.parse import parse_qs, urlparse
 
 from grpc import ssl_channel_credentials
@@ -16,6 +17,11 @@ def _to_bool(value: str) -> bool:
     if value in ("false", "off", "0"):
         return False
     raise ValueError(f"Invalid boolean value '{value}'")
+
+
+@dataclasses.dataclass(frozen=True)
+class _QueryParams:
+    ssl: bool | None = None
 
 
 def parse_grpc_uri(
@@ -44,6 +50,7 @@ def parse_grpc_uri(
     Supported query parameters:
 
     - `ssl` (bool): Enable or disable SSL. Defaults to `default_ssl`.
+
     Args:
         uri: The gRPC URI specifying the connection parameters.
         default_port: The default port number to use if the URI does not specify one.
@@ -69,9 +76,39 @@ def parse_grpc_uri(
                 uri,
             )
 
-    options = {k: v[-1] for k, v in parse_qs(parsed_uri.query).items()}
+    options = _parse_query_params(
+        uri,
+        parsed_uri.query,
+        _QueryParams(ssl=default_ssl),
+    )
+
+    host = parsed_uri.hostname
+    port = parsed_uri.port or default_port
+    target = f"{host}:{port}"
+    if options.ssl:
+        return secure_channel(target, ssl_channel_credentials())
+    return insecure_channel(target)
+
+
+def _parse_query_params(
+    uri: str, query_string: str, defaults: _QueryParams
+) -> _QueryParams:
+    """Parse query parameters from a URI.
+
+    Args:
+        uri: The URI from which the query parameters were extracted.
+        query_string: The query string to parse.
+        defaults: The default values for the query parameters.
+
+    Returns:
+        A `_QueryParams` object with the parsed query parameters.
+
+    Raises:
+        ValueError: If the query string contains unexpected components.
+    """
+    options = {k: v[-1] for k, v in parse_qs(query_string).items()}
     ssl_option = options.pop("ssl", None)
-    ssl = _to_bool(ssl_option) if ssl_option is not None else default_ssl
+    ssl = _to_bool(ssl_option) if ssl_option is not None else defaults.ssl
     if options:
         names = ", ".join(options)
         raise ValueError(
@@ -79,9 +116,4 @@ def parse_grpc_uri(
             uri,
         )
 
-    host = parsed_uri.hostname
-    port = parsed_uri.port or default_port
-    target = f"{host}:{port}"
-    if ssl:
-        return secure_channel(target, ssl_channel_credentials())
-    return insecure_channel(target)
+    return _QueryParams(ssl=ssl)
