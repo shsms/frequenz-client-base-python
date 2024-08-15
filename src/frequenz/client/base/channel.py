@@ -30,7 +30,7 @@ def parse_grpc_uri(
     The URI must have the following format:
 
     ```
-    grpc://hostname[:port][?ssl=<bool>]
+    grpc://hostname[:port][?param=value&...]
     ```
 
     A few things to consider about URI components:
@@ -38,11 +38,12 @@ def parse_grpc_uri(
     - If any other components are present in the URI, a [`ValueError`][] is raised.
     - If the port is omitted, the `default_port` is used.
     - If a query parameter is passed many times, the last value is used.
-    - The only supported query parameter is `ssl`, which must be a boolean value and
-      defaults to the `default_ssl` argument if not present.
     - Boolean query parameters can be specified with the following values
       (case-insensitive): `true`, `1`, `on`, `false`, `0`, `off`.
 
+    Supported query parameters:
+
+    - `ssl` (bool): Enable or disable SSL. Defaults to `default_ssl`.
     Args:
         uri: The gRPC URI specifying the connection parameters.
         default_port: The default port number to use if the URI does not specify one.
