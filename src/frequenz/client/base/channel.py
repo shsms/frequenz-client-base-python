@@ -22,6 +22,7 @@ def _to_bool(value: str) -> bool:
 @dataclasses.dataclass(frozen=True)
 class _QueryParams:
     ssl: bool | None = None
+    ssl_root_certificates_path: str | None = None
 
 
 def parse_grpc_uri(
@@ -50,6 +51,8 @@ def parse_grpc_uri(
     Supported query parameters:
 
     - `ssl` (bool): Enable or disable SSL. Defaults to `default_ssl`.
+    - `ssl_root_certificates_path` (str): Path to the root certificates file. Only
+      valid if SSL is enabled. Will raise a `ValueError` if the file cannot be read.
 
     Args:
         uri: The gRPC URI specifying the connection parameters.
@@ -86,7 +89,20 @@ def parse_grpc_uri(
     port = parsed_uri.port or default_port
     target = f"{host}:{port}"
     if options.ssl:
-        return secure_channel(target, ssl_channel_credentials())
+        root_cert: bytes | None = None
+        if options.ssl_root_certificates_path is not None:
+            try:
+                with open(options.ssl_root_certificates_path, "rb") as file:
+                    root_cert = file.read()
+            except OSError as exc:
+                raise ValueError(
+                    "Failed to read root certificates from "
+                    f"'{options.ssl_root_certificates_path}': {exc}",
+                    uri,
+                ) from exc
+        return secure_channel(
+            target, ssl_channel_credentials(root_certificates=root_cert)
+        )
     return insecure_channel(target)
 
 
@@ -109,6 +125,13 @@ def _parse_query_params(
     options = {k: v[-1] for k, v in parse_qs(query_string).items()}
     ssl_option = options.pop("ssl", None)
     ssl = _to_bool(ssl_option) if ssl_option is not None else defaults.ssl
+    ssl_root_cert_path = options.pop(
+        "ssl_root_certificates_path", defaults.ssl_root_certificates_path
+    )
+    if not ssl and ssl_root_cert_path:
+        raise ValueError(
+            f"'ssl_root_certificates_path' option found in URI {uri!r}, but SSL is disabled",
+        )
     if options:
         names = ", ".join(options)
         raise ValueError(
@@ -116,4 +139,4 @@ def _parse_query_params(
             uri,
         )
 
-    return _QueryParams(ssl=ssl)
+    return _QueryParams(ssl=ssl, ssl_root_certificates_path=ssl_root_cert_path)

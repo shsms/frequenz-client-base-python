@@ -83,7 +83,7 @@ def test_parse_uri_ok(  # pylint: disable=too-many-arguments,too-many-locals
     assert channel == expected_channel
     expected_target = f"{host}:{expected_port}"
     if expected_ssl:
-        ssl_channel_credentials_mock.assert_called_once_with()
+        ssl_channel_credentials_mock.assert_called_once_with(root_certificates=None)
         secure_channel_mock.assert_called_once_with(
             expected_target, expected_credentials
         )

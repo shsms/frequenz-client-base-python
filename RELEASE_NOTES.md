@@ -16,7 +16,7 @@
 
 ## New Features
 
-<!-- Here goes the main new features and examples or instructions on how to use them -->
+- The connection URI can now have a new `ssl_root_certificates_path` option to specify the path to the root certificates file to use when SSL is enabled.
 
 ## Bug Fixes
 
