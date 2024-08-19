@@ -9,7 +9,7 @@ import pytest
 from grpc import ssl_channel_credentials
 from grpc.aio import Channel
 
-from frequenz.client.base.channel import ChannelOptions, parse_grpc_uri
+from frequenz.client.base.channel import ChannelOptions, SslOptions, parse_grpc_uri
 
 VALID_URLS = [
     ("grpc://localhost", "localhost", 9090, True),
@@ -52,7 +52,7 @@ def test_parse_uri_ok(  # pylint: disable=too-many-arguments,too-many-locals
     expected_port = port if f":{port}" in uri or default_port is None else default_port
     expected_ssl = ssl if "ssl" in uri or default_ssl is None else default_ssl
 
-    defaults = ChannelOptions(port=expected_port, ssl=expected_ssl)
+    defaults = ChannelOptions(port=expected_port, ssl=SslOptions(enabled=expected_ssl))
 
     with (
         mock.patch(

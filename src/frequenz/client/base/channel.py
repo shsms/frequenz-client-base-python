@@ -12,14 +12,22 @@ from grpc.aio import Channel, insecure_channel, secure_channel
 
 
 @dataclasses.dataclass(frozen=True)
+class SslOptions:
+    """SSL options for a gRPC channel."""
+
+    enabled: bool = True
+    """Whether SSL should be enabled."""
+
+
+@dataclasses.dataclass(frozen=True)
 class ChannelOptions:
     """Options for a gRPC channel."""
 
     port: int = 9090
     """The port number to connect to."""
 
-    ssl: bool = True
-    """Whether to enable SSL."""
+    ssl: SslOptions = SslOptions()
+    """SSL options for the channel."""
 
 
 def parse_grpc_uri(
@@ -80,7 +88,7 @@ def parse_grpc_uri(
     port = parsed_uri.port or defaults.port
     target = f"{host}:{port}"
 
-    ssl = defaults.ssl if options.ssl is None else options.ssl
+    ssl = defaults.ssl.enabled if options.ssl is None else options.ssl
     if ssl:
         root_cert: bytes | None = None
         if options.ssl_root_certificates_path is not None:
