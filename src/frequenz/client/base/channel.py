@@ -10,21 +10,6 @@ from grpc import ssl_channel_credentials
 from grpc.aio import Channel, insecure_channel, secure_channel
 
 
-def _to_bool(value: str) -> bool:
-    value = value.lower()
-    if value in ("true", "on", "1"):
-        return True
-    if value in ("false", "off", "0"):
-        return False
-    raise ValueError(f"Invalid boolean value '{value}'")
-
-
-@dataclasses.dataclass(frozen=True)
-class _QueryParams:
-    ssl: bool | None = None
-    ssl_root_certificates_path: str | None = None
-
-
 def parse_grpc_uri(
     uri: str,
     /,
@@ -104,6 +89,21 @@ def parse_grpc_uri(
             target, ssl_channel_credentials(root_certificates=root_cert)
         )
     return insecure_channel(target)
+
+
+def _to_bool(value: str) -> bool:
+    value = value.lower()
+    if value in ("true", "on", "1"):
+        return True
+    if value in ("false", "off", "0"):
+        return False
+    raise ValueError(f"Invalid boolean value '{value}'")
+
+
+@dataclasses.dataclass(frozen=True)
+class _QueryParams:
+    ssl: bool | None = None
+    ssl_root_certificates_path: str | None = None
 
 
 def _parse_query_params(
