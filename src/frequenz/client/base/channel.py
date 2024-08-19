@@ -11,12 +11,21 @@ from grpc import ssl_channel_credentials
 from grpc.aio import Channel, insecure_channel, secure_channel
 
 
+@dataclasses.dataclass(frozen=True)
+class ChannelOptions:
+    """Options for a gRPC channel."""
+
+    port: int = 9090
+    """The port number to connect to."""
+
+    ssl: bool = True
+    """Whether to enable SSL."""
+
+
 def parse_grpc_uri(
     uri: str,
     /,
-    *,
-    default_port: int = 9090,
-    default_ssl: bool = True,
+    defaults: ChannelOptions = ChannelOptions(),
 ) -> Channel:
     """Create a client channel from a URI.
 
@@ -42,8 +51,8 @@ def parse_grpc_uri(
 
     Args:
         uri: The gRPC URI specifying the connection parameters.
-        default_port: The default port number to use if the URI does not specify one.
-        default_ssl: The default SSL setting to use if the URI does not specify one.
+        defaults: The default options use to create the channel when not specified in
+            the URI.
 
     Returns:
         A client channel object.
@@ -68,10 +77,10 @@ def parse_grpc_uri(
     options = _parse_query_params(uri, parsed_uri.query)
 
     host = parsed_uri.hostname
-    port = parsed_uri.port or default_port
+    port = parsed_uri.port or defaults.port
     target = f"{host}:{port}"
 
-    ssl = default_ssl if options.ssl is None else options.ssl
+    ssl = defaults.ssl if options.ssl is None else options.ssl
     if ssl:
         root_cert: bytes | None = None
         if options.ssl_root_certificates_path is not None:

@@ -3,14 +3,13 @@
 
 """Test cases for the channel module."""
 
-from typing import NotRequired, TypedDict
 from unittest import mock
 
 import pytest
 from grpc import ssl_channel_credentials
 from grpc.aio import Channel
 
-from frequenz.client.base.channel import parse_grpc_uri
+from frequenz.client.base.channel import ChannelOptions, parse_grpc_uri
 
 VALID_URLS = [
     ("grpc://localhost", "localhost", 9090, True),
@@ -28,11 +27,6 @@ VALID_URLS = [
     ("grpc://localhost:1234?ssl=0&ssl=1", "localhost", 1234, True),
     ("grpc://localhost:1234?ssl=1&ssl=0", "localhost", 1234, False),
 ]
-
-
-class _CreateChannelKwargs(TypedDict):
-    default_port: NotRequired[int]
-    default_ssl: NotRequired[bool]
 
 
 @pytest.mark.parametrize("uri, host, port, ssl", VALID_URLS)
@@ -58,11 +52,7 @@ def test_parse_uri_ok(  # pylint: disable=too-many-arguments,too-many-locals
     expected_port = port if f":{port}" in uri or default_port is None else default_port
     expected_ssl = ssl if "ssl" in uri or default_ssl is None else default_ssl
 
-    kwargs = _CreateChannelKwargs()
-    if default_port is not None:
-        kwargs["default_port"] = default_port
-    if default_ssl is not None:
-        kwargs["default_ssl"] = default_ssl
+    defaults = ChannelOptions(port=expected_port, ssl=expected_ssl)
 
     with (
         mock.patch(
@@ -78,7 +68,7 @@ def test_parse_uri_ok(  # pylint: disable=too-many-arguments,too-many-locals
             return_value=expected_credentials,
         ) as ssl_channel_credentials_mock,
     ):
-        channel = parse_grpc_uri(uri, **kwargs)
+        channel = parse_grpc_uri(uri, defaults)
 
     assert channel == expected_channel
     expected_target = f"{host}:{expected_port}"
