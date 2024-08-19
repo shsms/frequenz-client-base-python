@@ -236,14 +236,18 @@ def _get_contents(
                 case bytes() as default_bytes:
                     return default_bytes
                 case pathlib.Path() as file_path:
-                    pass
+                    return _read_bytes(name, file_path)
                 case unexpected:
                     assert_never(unexpected)
         case pathlib.Path() as file_path:
-            pass
+            return _read_bytes(name, file_path)
         case unexpected:
             assert_never(unexpected)
+
+
+def _read_bytes(name: str, source: pathlib.Path) -> bytes:
+    """Read the contents of a file as bytes."""
     try:
-        return file_path.read_bytes()
+        return source.read_bytes()
     except OSError as exc:
-        raise ValueError(f"Failed to read {name} from '{file_path}': {exc}") from exc
+        raise ValueError(f"Failed to read {name} from '{source}': {exc}") from exc
