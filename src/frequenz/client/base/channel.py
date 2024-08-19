@@ -5,6 +5,7 @@
 
 import dataclasses
 import pathlib
+from typing import assert_never
 from urllib.parse import parse_qs, urlparse
 
 from grpc import ssl_channel_credentials
@@ -17,6 +18,13 @@ class SslOptions:
 
     enabled: bool = True
     """Whether SSL should be enabled."""
+
+    root_certificates: pathlib.Path | bytes | None = None
+    """The PEM-encoded root certificates.
+
+    This can be a path to a file containing the certificates, a byte string, or None to
+    retrieve them from a default location chosen by gRPC runtime.
+    """
 
 
 @dataclasses.dataclass(frozen=True)
@@ -90,19 +98,15 @@ def parse_grpc_uri(
 
     ssl = defaults.ssl.enabled if options.ssl is None else options.ssl
     if ssl:
-        root_cert: bytes | None = None
-        if options.ssl_root_certificates_path is not None:
-            try:
-                with options.ssl_root_certificates_path.open("rb") as file:
-                    root_cert = file.read()
-            except OSError as exc:
-                raise ValueError(
-                    "Failed to read root certificates from "
-                    f"'{options.ssl_root_certificates_path}': {exc}",
-                    uri,
-                ) from exc
         return secure_channel(
-            target, ssl_channel_credentials(root_certificates=root_cert)
+            target,
+            ssl_channel_credentials(
+                root_certificates=_get_contents(
+                    "root certificates",
+                    options.ssl_root_certificates_path,
+                    defaults.ssl.root_certificates,
+                )
+            ),
         )
     return insecure_channel(target)
 
@@ -160,3 +164,45 @@ def _parse_query_params(uri: str, query_string: str) -> _QueryParams:
             pathlib.Path(ssl_root_cert_path) if ssl_root_cert_path else None
         ),
     )
+
+
+def _get_contents(
+    name: str, source: pathlib.Path | None, default: pathlib.Path | bytes | None
+) -> bytes | None:
+    """Get the contents of a file or use a default value.
+
+    If the `source` is `None`, the `default` value is used instead. If the source (or
+    default) is a path, the contents of the file are returned. If the source is a byte
+    string (or default) the byte string is returned without doing any reading.
+
+    Args:
+        name: The name of the contents (used for error messages).
+        source: The source of the contents.
+        default: The default value to use if the source is None.
+
+    Returns:
+        The contents of the source file or the default value.
+
+    Raises:
+        ValueError: If the file cannot be read.
+    """
+    file_path: pathlib.Path
+    match source:
+        case None:
+            match default:
+                case None:
+                    return None
+                case bytes() as default_bytes:
+                    return default_bytes
+                case pathlib.Path() as file_path:
+                    pass
+                case unexpected:
+                    assert_never(unexpected)
+        case pathlib.Path() as file_path:
+            pass
+        case unexpected:
+            assert_never(unexpected)
+    try:
+        return file_path.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"Failed to read {name} from '{file_path}': {exc}") from exc
