@@ -223,9 +223,6 @@ def _get_contents(
 
     Returns:
         The contents of the source file or the default value.
-
-    Raises:
-        ValueError: If the file cannot be read.
     """
     file_path: pathlib.Path
     match source:
