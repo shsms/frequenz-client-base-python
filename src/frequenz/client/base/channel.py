@@ -64,16 +64,14 @@ def parse_grpc_uri(
                 uri,
             )
 
-    options = _parse_query_params(
-        uri,
-        parsed_uri.query,
-        _QueryParams(ssl=default_ssl),
-    )
+    options = _parse_query_params(uri, parsed_uri.query)
 
     host = parsed_uri.hostname
     port = parsed_uri.port or default_port
     target = f"{host}:{port}"
-    if options.ssl:
+
+    ssl = default_ssl if options.ssl is None else options.ssl
+    if ssl:
         root_cert: bytes | None = None
         if options.ssl_root_certificates_path is not None:
             try:
@@ -102,19 +100,16 @@ def _to_bool(value: str) -> bool:
 
 @dataclasses.dataclass(frozen=True)
 class _QueryParams:
-    ssl: bool | None = None
-    ssl_root_certificates_path: str | None = None
+    ssl: bool | None
+    ssl_root_certificates_path: str | None
 
 
-def _parse_query_params(
-    uri: str, query_string: str, defaults: _QueryParams
-) -> _QueryParams:
+def _parse_query_params(uri: str, query_string: str) -> _QueryParams:
     """Parse query parameters from a URI.
 
     Args:
         uri: The URI from which the query parameters were extracted.
         query_string: The query string to parse.
-        defaults: The default values for the query parameters.
 
     Returns:
         A `_QueryParams` object with the parsed query parameters.
@@ -124,14 +119,16 @@ def _parse_query_params(
     """
     options = {k: v[-1] for k, v in parse_qs(query_string).items()}
     ssl_option = options.pop("ssl", None)
-    ssl = _to_bool(ssl_option) if ssl_option is not None else defaults.ssl
-    ssl_root_cert_path = options.pop(
-        "ssl_root_certificates_path", defaults.ssl_root_certificates_path
-    )
-    if not ssl and ssl_root_cert_path:
+    ssl: bool | None = None
+    if ssl_option is not None:
+        ssl = _to_bool(ssl_option)
+
+    ssl_root_cert_path = options.pop("ssl_root_certificates_path", None)
+    if ssl is False and ssl_root_cert_path is not None:
         raise ValueError(
             f"'ssl_root_certificates_path' option found in URI {uri!r}, but SSL is disabled",
         )
+
     if options:
         names = ", ".join(options)
         raise ValueError(
