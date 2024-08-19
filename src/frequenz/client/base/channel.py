@@ -4,6 +4,7 @@
 """Handling of gRPC channels."""
 
 import dataclasses
+import pathlib
 from urllib.parse import parse_qs, urlparse
 
 from grpc import ssl_channel_credentials
@@ -75,7 +76,7 @@ def parse_grpc_uri(
         root_cert: bytes | None = None
         if options.ssl_root_certificates_path is not None:
             try:
-                with open(options.ssl_root_certificates_path, "rb") as file:
+                with options.ssl_root_certificates_path.open("rb") as file:
                     root_cert = file.read()
             except OSError as exc:
                 raise ValueError(
@@ -101,7 +102,7 @@ def _to_bool(value: str) -> bool:
 @dataclasses.dataclass(frozen=True)
 class _QueryParams:
     ssl: bool | None
-    ssl_root_certificates_path: str | None
+    ssl_root_certificates_path: pathlib.Path | None
 
 
 def _parse_query_params(uri: str, query_string: str) -> _QueryParams:
@@ -136,4 +137,9 @@ def _parse_query_params(uri: str, query_string: str) -> _QueryParams:
             uri,
         )
 
-    return _QueryParams(ssl=ssl, ssl_root_certificates_path=ssl_root_cert_path)
+    return _QueryParams(
+        ssl=ssl,
+        ssl_root_certificates_path=(
+            pathlib.Path(ssl_root_cert_path) if ssl_root_cert_path else None
+        ),
+    )
