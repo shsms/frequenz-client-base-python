@@ -26,6 +26,20 @@ class SslOptions:
     retrieve them from a default location chosen by gRPC runtime.
     """
 
+    private_key: pathlib.Path | bytes | None = None
+    """The PEM-encoded private key.
+
+    This can be a path to a file containing the key, a byte string, or None if no key
+    should be used.
+    """
+
+    certificate_chain: pathlib.Path | bytes | None = None
+    """The PEM-encoded certificate chain.
+
+    This can be a path to a file containing the chain, a byte string, or None if no
+    chain should be used.
+    """
+
 
 @dataclasses.dataclass(frozen=True)
 class ChannelOptions:
@@ -63,6 +77,10 @@ def parse_grpc_uri(
 
     - `ssl` (bool): Enable or disable SSL. Defaults to `default_ssl`.
     - `ssl_root_certificates_path` (str): Path to the root certificates file. Only
+      valid if SSL is enabled. Will raise a `ValueError` if the file cannot be read.
+    - `ssl_private_key_path` (str): Path to the private key file. Only valid if SSL is
+      enabled. Will raise a `ValueError` if the file cannot be read.
+    - `ssl_certificate_chain_path` (str): Path to the certificate chain file. Only
       valid if SSL is enabled. Will raise a `ValueError` if the file cannot be read.
 
     Args:
@@ -105,7 +123,17 @@ def parse_grpc_uri(
                     "root certificates",
                     options.ssl_root_certificates_path,
                     defaults.ssl.root_certificates,
-                )
+                ),
+                private_key=_get_contents(
+                    "private key",
+                    options.ssl_private_key_path,
+                    defaults.ssl.private_key,
+                ),
+                certificate_chain=_get_contents(
+                    "certificate chain",
+                    options.ssl_certificate_chain_path,
+                    defaults.ssl.certificate_chain,
+                ),
             ),
         )
     return insecure_channel(target)
@@ -124,6 +152,8 @@ def _to_bool(value: str) -> bool:
 class _QueryParams:
     ssl: bool | None
     ssl_root_certificates_path: pathlib.Path | None
+    ssl_private_key_path: pathlib.Path | None
+    ssl_certificate_chain_path: pathlib.Path | None
 
 
 def _parse_query_params(uri: str, query_string: str) -> _QueryParams:
@@ -145,11 +175,24 @@ def _parse_query_params(uri: str, query_string: str) -> _QueryParams:
     if ssl_option is not None:
         ssl = _to_bool(ssl_option)
 
-    ssl_root_cert_path = options.pop("ssl_root_certificates_path", None)
-    if ssl is False and ssl_root_cert_path is not None:
-        raise ValueError(
-            f"'ssl_root_certificates_path' option found in URI {uri!r}, but SSL is disabled",
+    ssl_opts = {
+        k: options.pop(k, None)
+        for k in (
+            "ssl_root_certificates_path",
+            "ssl_private_key_path",
+            "ssl_certificate_chain_path",
         )
+    }
+
+    if ssl is False:
+        erros = []
+        for opt_name, opt in ssl_opts.items():
+            if opt is not None:
+                erros.append(opt_name)
+        if erros:
+            raise ValueError(
+                f"Option(s) {', '.join(erros)} found in URI {uri!r}, but SSL is disabled",
+            )
 
     if options:
         names = ", ".join(options)
@@ -160,9 +203,7 @@ def _parse_query_params(uri: str, query_string: str) -> _QueryParams:
 
     return _QueryParams(
         ssl=ssl,
-        ssl_root_certificates_path=(
-            pathlib.Path(ssl_root_cert_path) if ssl_root_cert_path else None
-        ),
+        **{k: pathlib.Path(v) if v is not None else None for k, v in ssl_opts.items()},
     )
 
 
