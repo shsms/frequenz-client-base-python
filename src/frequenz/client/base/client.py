@@ -103,7 +103,7 @@ class BaseApiClient(abc.ABC, Generic[StubT]):
                     break
         ```
 
-        !!! Note
+        Note:
             * In this case a very simple `GrpcStreamBroadcaster` is used, asuming that
                 each call to `example_stream` will stream the same data. If the request
                 is more complex, you will probably need to have some kind of map from
