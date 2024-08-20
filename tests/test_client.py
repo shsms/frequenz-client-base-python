@@ -11,6 +11,7 @@ import grpc.aio
 import pytest
 import pytest_mock
 
+from frequenz.client.base.channel import ChannelOptions, SslOptions
 from frequenz.client.base.client import BaseApiClient, StubT, call_stub_method
 from frequenz.client.base.exception import ClientNotConnected, UnknownError
 
@@ -52,6 +53,7 @@ def create_client_with_mocks(
     *,
     auto_connect: bool = True,
     server_url: str = _DEFAULT_SERVER_URL,
+    channel_defaults: ChannelOptions | None = None,
 ) -> tuple[BaseApiClient[mock.MagicMock], _ClientMocks]:
     """Create a BaseApiClient instance with mocks."""
     mock_stub = mock.MagicMock(name="stub")
@@ -60,10 +62,14 @@ def create_client_with_mocks(
     mock_parse_grpc_uri = mocker.patch(
         "frequenz.client.base.client.parse_grpc_uri", return_value=mock_channel
     )
+    kwargs = {}
+    if channel_defaults is not None:
+        kwargs["channel_defaults"] = channel_defaults
     client = BaseApiClient(
         server_url=server_url,
         create_stub=mock_create_stub,
         connect=auto_connect,
+        **kwargs,
     )
     return client, _ClientMocks(
         stub=mock_stub,
@@ -82,7 +88,9 @@ def test_base_api_client_init(
     client, mocks = create_client_with_mocks(mocker, auto_connect=auto_connect)
     assert client.server_url == _DEFAULT_SERVER_URL
     if auto_connect:
-        mocks.parse_grpc_uri.assert_called_once_with(client.server_url)
+        mocks.parse_grpc_uri.assert_called_once_with(
+            client.server_url, ChannelOptions()
+        )
         assert client.channel is mocks.channel
         assert client.stub is mocks.stub
         assert client.is_connected
@@ -91,6 +99,20 @@ def test_base_api_client_init(
         _assert_is_disconnected(client)
         mocks.parse_grpc_uri.assert_not_called()
         mocks.create_stub.assert_not_called()
+
+
+def test_base_api_client_init_with_channel_defaults(
+    mocker: pytest_mock.MockFixture,
+) -> None:
+    """Test initializing the BaseApiClient with channel defaults."""
+    channel_defaults = ChannelOptions(port=1234, ssl=SslOptions(enabled=False))
+    client, mocks = create_client_with_mocks(mocker, channel_defaults=channel_defaults)
+    assert client.server_url == _DEFAULT_SERVER_URL
+    mocks.parse_grpc_uri.assert_called_once_with(client.server_url, channel_defaults)
+    assert client.channel is mocks.channel
+    assert client.stub is mocks.stub
+    assert client.is_connected
+    mocks.create_stub.assert_called_once_with(mocks.channel)
 
 
 @pytest.mark.parametrize(
@@ -128,7 +150,9 @@ def test_base_api_client_connect(
         mocks.parse_grpc_uri.assert_not_called()
         mocks.create_stub.assert_not_called()
     else:
-        mocks.parse_grpc_uri.assert_called_once_with(client.server_url)
+        mocks.parse_grpc_uri.assert_called_once_with(
+            client.server_url, ChannelOptions()
+        )
         mocks.create_stub.assert_called_once_with(mocks.channel)
 
 
@@ -166,7 +190,9 @@ async def test_base_api_client_async_context_manager(
             mocks.parse_grpc_uri.assert_not_called()
             mocks.create_stub.assert_not_called()
         else:
-            mocks.parse_grpc_uri.assert_called_once_with(client.server_url)
+            mocks.parse_grpc_uri.assert_called_once_with(
+                client.server_url, ChannelOptions()
+            )
             mocks.create_stub.assert_called_once_with(mocks.channel)
 
     mocks.channel.__aexit__.assert_called_once_with(None, None, None)

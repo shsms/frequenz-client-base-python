@@ -10,7 +10,7 @@ from typing import Any, Generic, Self, TypeVar, overload
 
 from grpc.aio import AioRpcError, Channel
 
-from .channel import parse_grpc_uri
+from .channel import ChannelOptions, parse_grpc_uri
 from .exception import ApiClientError, ClientNotConnected
 
 StubT = TypeVar("StubT")
@@ -117,6 +117,7 @@ class BaseApiClient(abc.ABC, Generic[StubT]):
         create_stub: Callable[[Channel], StubT],
         *,
         connect: bool = True,
+        channel_defaults: ChannelOptions = ChannelOptions(),
     ) -> None:
         """Create an instance and connect to the server.
 
@@ -127,9 +128,12 @@ class BaseApiClient(abc.ABC, Generic[StubT]):
                 created. If `False`, the client will not connect to the server until
                 [connect()][frequenz.client.base.client.BaseApiClient.connect] is
                 called.
+            channel_defaults: The default options for the gRPC channel to create using
+                the server URL.
         """
         self._server_url: str = server_url
         self._create_stub: Callable[[Channel], StubT] = create_stub
+        self._channel_defaults: ChannelOptions = channel_defaults
         self._channel: Channel | None = None
         self._stub: StubT | None = None
         if connect:
@@ -155,6 +159,11 @@ class BaseApiClient(abc.ABC, Generic[StubT]):
         if self._channel is None:
             raise ClientNotConnected(server_url=self.server_url, operation="channel")
         return self._channel
+
+    @property
+    def channel_defaults(self) -> ChannelOptions:
+        """The default options for the gRPC channel."""
+        return self._channel_defaults
 
     @property
     def stub(self) -> StubT:
@@ -192,7 +201,7 @@ class BaseApiClient(abc.ABC, Generic[StubT]):
             self._server_url = server_url
         elif self.is_connected:
             return
-        self._channel = parse_grpc_uri(self._server_url)
+        self._channel = parse_grpc_uri(self._server_url, self._channel_defaults)
         self._stub = self._create_stub(self._channel)
 
     async def disconnect(self) -> None:
