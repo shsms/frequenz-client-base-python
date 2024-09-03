@@ -110,9 +110,9 @@ def parse_grpc_uri(
 
     options = _parse_query_params(uri, parsed_uri.query)
 
-    host = parsed_uri.hostname
-    port = parsed_uri.port or defaults.port
-    target = f"{host}:{port}"
+    target = (
+        parsed_uri.netloc if parsed_uri.port else f"{parsed_uri.netloc}:{defaults.port}"
+    )
 
     ssl = defaults.ssl.enabled if options.ssl is None else options.ssl
     if ssl:
