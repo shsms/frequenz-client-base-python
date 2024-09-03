@@ -24,6 +24,7 @@ class _ValidUrlTestCase:
     title: str
     uri: str
     expected_host: str
+    expected_port: int | None
     expected_options: ChannelOptions
     defaults: ChannelOptions = ChannelOptions()
 
@@ -33,10 +34,10 @@ class _ValidUrlTestCase:
     [
         _ValidUrlTestCase(
             title="default",
-            uri="grpc://localhost",
+            uri="grpc://localhost:9090",
             expected_host="localhost",
+            expected_port=9090,
             expected_options=ChannelOptions(
-                port=9090,
                 ssl=SslOptions(
                     enabled=True,
                     root_certificates=None,
@@ -46,12 +47,27 @@ class _ValidUrlTestCase:
             ),
         ),
         _ValidUrlTestCase(
-            title="default no SSL defaults",
+            title="default with default port",
             uri="grpc://localhost",
-            defaults=ChannelOptions(port=2355, ssl=SslOptions(enabled=False)),
             expected_host="localhost",
+            expected_port=9090,
             expected_options=ChannelOptions(
-                port=2355,
+                ssl=SslOptions(
+                    enabled=True,
+                    root_certificates=None,
+                    private_key=None,
+                    certificate_chain=None,
+                ),
+            ),
+            defaults=ChannelOptions(port=9090),
+        ),
+        _ValidUrlTestCase(
+            title="default no SSL defaults",
+            uri="grpc://localhost:2355",
+            defaults=ChannelOptions(ssl=SslOptions(enabled=False)),
+            expected_host="localhost",
+            expected_port=2355,
+            expected_options=ChannelOptions(
                 ssl=SslOptions(
                     enabled=False,
                     root_certificates=None,
@@ -62,9 +78,8 @@ class _ValidUrlTestCase:
         ),
         _ValidUrlTestCase(
             title="default with SSL defaults",
-            uri="grpc://localhost",
+            uri="grpc://localhost:2355",
             defaults=ChannelOptions(
-                port=2355,
                 ssl=SslOptions(
                     enabled=True,
                     root_certificates=None,
@@ -73,8 +88,8 @@ class _ValidUrlTestCase:
                 ),
             ),
             expected_host="localhost",
+            expected_port=2355,
             expected_options=ChannelOptions(
-                port=2355,
                 ssl=SslOptions(
                     enabled=True,
                     root_certificates=None,
@@ -88,8 +103,8 @@ class _ValidUrlTestCase:
             uri="grpc://localhost:1234?ssl=1&ssl_root_certificates_path=/root_cert"
             "&ssl_private_key_path=/key&ssl_certificate_chain_path=/chain",
             expected_host="localhost",
+            expected_port=1234,
             expected_options=ChannelOptions(
-                port=1234,
                 ssl=SslOptions(
                     enabled=True,
                     root_certificates=pathlib.Path("/root_cert"),
@@ -103,7 +118,6 @@ class _ValidUrlTestCase:
             uri="grpc://localhost:1234?ssl=1&ssl_root_certificates_path=/root_cert"
             "&ssl_private_key_path=/key&ssl_certificate_chain_path=/chain",
             defaults=ChannelOptions(
-                port=4444,
                 ssl=SslOptions(
                     enabled=True,
                     root_certificates=pathlib.Path("/root_cert_def"),
@@ -112,8 +126,8 @@ class _ValidUrlTestCase:
                 ),
             ),
             expected_host="localhost",
+            expected_port=1234,
             expected_options=ChannelOptions(
-                port=1234,
                 ssl=SslOptions(
                     enabled=True,
                     root_certificates=pathlib.Path("/root_cert"),
@@ -138,11 +152,7 @@ def test_parse_uri_ok(  # pylint: disable=too-many-locals
     expected_credentials = mock.MagicMock(
         name="mock_credentials", spec=ssl_channel_credentials
     )
-    expected_port = (
-        expected_options.port
-        if f":{expected_options.port}" in uri or defaults.port is None
-        else defaults.port
-    )
+    expected_port = case.expected_port
     expected_ssl = (
         expected_options.ssl.enabled
         if "ssl=" in uri or defaults.ssl.enabled is None
@@ -269,4 +279,14 @@ def test_parse_uri_error(
 ) -> None:
     """Test parsing of invalid gRPC URIs for grpclib."""
     with pytest.raises(ValueError, match=error_msg):
+        parse_grpc_uri(uri)
+
+
+def test_invalid_url_no_default_port() -> None:
+    """Test parsing of invalid gRPC URIs for grpclib."""
+    uri = "grpc://localhost"
+    with pytest.raises(
+        ValueError,
+        match=r"The gRPC URI 'grpc://localhost' doesn't specify a port and there is no default.",
+    ):
         parse_grpc_uri(uri)

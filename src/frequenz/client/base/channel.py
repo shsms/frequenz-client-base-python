@@ -45,7 +45,7 @@ class SslOptions:
 class ChannelOptions:
     """Options for a gRPC channel."""
 
-    port: int = 9090
+    port: int | None = None
     """The port number to connect to."""
 
     ssl: SslOptions = SslOptions()
@@ -68,7 +68,8 @@ def parse_grpc_uri(
     A few things to consider about URI components:
 
     - If any other components are present in the URI, a [`ValueError`][] is raised.
-    - If the port is omitted, the `default_port` is used.
+    - If the port is omitted, the `default_port` is used unless it is `None`, in which
+      case a `ValueError` is raised
     - If a query parameter is passed many times, the last value is used.
     - Boolean query parameters can be specified with the following values
       (case-insensitive): `true`, `1`, `on`, `false`, `0`, `off`.
@@ -109,6 +110,11 @@ def parse_grpc_uri(
             )
 
     options = _parse_query_params(uri, parsed_uri.query)
+
+    if parsed_uri.port is None and defaults.port is None:
+        raise ValueError(
+            f"The gRPC URI '{uri}' doesn't specify a port and there is no default."
+        )
 
     target = (
         parsed_uri.netloc if parsed_uri.port else f"{parsed_uri.netloc}:{defaults.port}"
