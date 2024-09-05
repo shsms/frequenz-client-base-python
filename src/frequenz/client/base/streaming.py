@@ -5,8 +5,8 @@
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Callable
-from typing import Generic, TypeVar
+from collections.abc import Callable
+from typing import AsyncIterable, Generic, TypeVar
 
 import grpc.aio
 
@@ -30,7 +30,7 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
     def __init__(
         self,
         stream_name: str,
-        stream_method: Callable[[], AsyncIterator[InputT]],
+        stream_method: Callable[[], AsyncIterable[InputT]],
         transform: Callable[[InputT], OutputT],
         retry_strategy: retry.Strategy | None = None,
     ):
