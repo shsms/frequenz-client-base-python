@@ -105,7 +105,7 @@ def test_base_api_client_init_with_channel_defaults(
     mocker: pytest_mock.MockFixture,
 ) -> None:
     """Test initializing the BaseApiClient with channel defaults."""
-    channel_defaults = ChannelOptions(port=1234, ssl=SslOptions(enabled=False))
+    channel_defaults = ChannelOptions(ssl=SslOptions(enabled=False))
     client, mocks = create_client_with_mocks(mocker, channel_defaults=channel_defaults)
     assert client.server_url == _DEFAULT_SERVER_URL
     mocks.parse_grpc_uri.assert_called_once_with(client.server_url, channel_defaults)
