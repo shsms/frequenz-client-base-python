@@ -23,7 +23,7 @@ class TestLinearBackoff:
 
     def test_iter(self) -> None:
         """Test iterator."""
-        assert list(retry.LinearBackoff(1, 0, 3)) == [1, 1, 1]
+        assert list(retry.LinearBackoff(interval=1, jitter=0, limit=3)) == [1, 1, 1]
 
     def test_with_limit(self) -> None:
         """Test limit works."""
@@ -89,7 +89,7 @@ class TestLinearBackoff:
 
     def test_deep_copy(self) -> None:
         """Test if deep copies are really deep copies."""
-        strategy = retry.LinearBackoff(1.0, 0.0, 2)
+        strategy = retry.LinearBackoff(interval=1.0, jitter=0.0, limit=2)
 
         copy1 = strategy.copy()
         assert copy1.next_interval() == 1.0
@@ -108,7 +108,9 @@ class TestExponentialBackoff:
 
     def test_no_limit(self) -> None:
         """Test base case."""
-        strategy = retry.ExponentialBackoff(3, 30, 2, 0.0)
+        strategy = retry.ExponentialBackoff(
+            initial_interval=3, max_interval=30, multiplier=2, jitter=0.0
+        )
 
         assert strategy.next_interval() == 3.0
         assert strategy.next_interval() == 6.0
@@ -119,7 +121,7 @@ class TestExponentialBackoff:
 
     def test_with_limit(self) -> None:
         """Test limit works."""
-        strategy = retry.ExponentialBackoff(3, jitter=0.0, limit=3)
+        strategy = retry.ExponentialBackoff(initial_interval=3, jitter=0.0, limit=3)
 
         assert strategy.next_interval() == 3.0
         assert strategy.next_interval() == 6.0
@@ -128,7 +130,9 @@ class TestExponentialBackoff:
 
     def test_deep_copy(self) -> None:
         """Test if deep copies are really deep copies."""
-        strategy = retry.ExponentialBackoff(3.0, 30.0, 2, 0.0, 2)
+        strategy = retry.ExponentialBackoff(
+            initial_interval=3.0, max_interval=30.0, multiplier=2, jitter=0.0, limit=2
+        )
 
         copy1 = strategy.copy()
         assert copy1.next_interval() == 3.0

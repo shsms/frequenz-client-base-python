@@ -258,7 +258,9 @@ async def call_stub_method(
 ) -> StubOutT: ...
 
 
-async def call_stub_method(
+# We need the `noqa: DOC503` because `pydoclint` can't figure out that
+# `ApiClientError.from_grpc_error()` returns a `GrpcError` instance.
+async def call_stub_method(  # noqa: DOC503
     client: BaseApiClient[StubT],
     stub_method: Callable[[], Awaitable[StubOutT]],
     *,
