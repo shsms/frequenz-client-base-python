@@ -79,6 +79,7 @@ class LinearBackoff(Strategy):
 
     def __init__(
         self,
+        *,
         interval: float = DEFAULT_RETRY_INTERVAL,
         jitter: float = DEFAULT_RETRY_JITTER,
         limit: int | None = None,
@@ -124,9 +125,9 @@ class ExponentialBackoff(Strategy):
     DEFAULT_MULTIPLIER = 2.0
     """Default multiplier for exponential increment."""
 
-    # pylint: disable=too-many-arguments
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments
         self,
+        *,
         initial_interval: float = DEFAULT_INTERVAL,
         max_interval: float = DEFAULT_MAX_INTERVAL,
         multiplier: float = DEFAULT_MULTIPLIER,
