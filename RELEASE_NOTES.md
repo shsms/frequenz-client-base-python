@@ -12,7 +12,7 @@
 
 ## New Features
 
-<!-- Here goes the main new features and examples or instructions on how to use them -->
+- Added support for http2 keep-alive.
 
 ## Bug Fixes
 
