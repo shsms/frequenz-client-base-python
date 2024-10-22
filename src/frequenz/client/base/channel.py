@@ -51,6 +51,16 @@ class ChannelOptions:
     ssl: SslOptions = SslOptions()
     """SSL options for the channel."""
 
+    keep_alive_time_ms: int | None = None
+    """The time in milliseconds between HTTP2 keep-alive pings.
+
+    If None, keep-alive is disabled."""
+
+    keep_alive_timeout_ms: int = 20_000
+    """The time in milliseconds to wait for a HTTP2 keep-alive response.
+
+    This is only used if `keep_alive_time_ms` is not None."""
+
 
 def parse_grpc_uri(
     uri: str,
@@ -120,6 +130,17 @@ def parse_grpc_uri(
         parsed_uri.netloc if parsed_uri.port else f"{parsed_uri.netloc}:{defaults.port}"
     )
 
+    channel_options = (
+        [
+            ("grpc.http2.max_pings_without_data", 0),
+            ("grpc.keepalive_permit_without_calls", 1),
+            ("grpc.keepalive_time_ms", defaults.keep_alive_time_ms),
+            ("grpc.keepalive_timeout_ms", defaults.keep_alive_timeout_ms),
+        ]
+        if defaults.keep_alive_time_ms is not None
+        else None
+    )
+
     ssl = defaults.ssl.enabled if options.ssl is None else options.ssl
     if ssl:
         return secure_channel(
@@ -141,8 +162,9 @@ def parse_grpc_uri(
                     defaults.ssl.certificate_chain,
                 ),
             ),
+            channel_options,
         )
-    return insecure_channel(target)
+    return insecure_channel(target, channel_options)
 
 
 def _to_bool(value: str) -> bool:

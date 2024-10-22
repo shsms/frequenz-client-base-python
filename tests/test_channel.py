@@ -198,6 +198,16 @@ def test_parse_uri_ok(  # pylint: disable=too-many-locals
 
     assert channel == expected_channel
     expected_target = f"{expected_host}:{expected_port}"
+    expected_channel_options = (
+        [
+            ("grpc.http2.max_pings_without_data", 0),
+            ("grpc.keepalive_permit_without_calls", 1),
+            ("grpc.keepalive_time_ms", defaults.keep_alive_time_ms),
+            ("grpc.keepalive_timeout_ms", defaults.keep_alive_timeout_ms),
+        ]
+        if defaults.keep_alive_time_ms is not None
+        else None
+    )
     if expected_ssl:
         if isinstance(expected_root_certificates, pathlib.Path):
             get_contents_mock.assert_any_call(
@@ -223,10 +233,12 @@ def test_parse_uri_ok(  # pylint: disable=too-many-locals
             certificate_chain=expected_certificate_chain,
         )
         secure_channel_mock.assert_called_once_with(
-            expected_target, expected_credentials
+            expected_target, expected_credentials, expected_channel_options
         )
     else:
-        insecure_channel_mock.assert_called_once_with(expected_target)
+        insecure_channel_mock.assert_called_once_with(
+            expected_target, expected_channel_options
+        )
 
 
 @pytest.mark.parametrize("value", ["true", "on", "1", "TrUe", "On", "ON", "TRUE"])
