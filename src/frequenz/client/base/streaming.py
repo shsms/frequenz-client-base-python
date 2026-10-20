@@ -5,11 +5,20 @@
 
 import asyncio
 import contextlib
+import functools
 import logging
+import weakref
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import AsyncIterable, Generic, Literal, TypeAlias, TypeVar, overload
+from typing import (
+    AsyncIterable,
+    Generic,
+    Literal,
+    TypeAlias,
+    TypeVar,
+    overload,
+)
 
 import grpc.aio
 
@@ -25,6 +34,9 @@ InputT = TypeVar("InputT")
 
 OutputT = TypeVar("OutputT")
 """The output type of the stream."""
+
+_T = TypeVar("_T")
+"""The message type of a tracked receiver."""
 
 
 @dataclass(frozen=True)
@@ -88,9 +100,14 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
     when the connection is lost, and broadcasting the received messages to
     multiple receivers.
 
-    The stream is started when the class is initialized, and can be stopped
-    with the `stop` method. New receivers can be created with the
-    `new_receiver` method, which will receive the streamed messages.
+    The stream starts when the broadcaster is created. It stops when `stop()` is
+    called, or when the stream ends, gives up or fails. New receivers can be
+    created with the `new_receiver` method, which will receive the streamed
+    messages.
+
+    Once receivers were handed out, the stream also stops by itself when every
+    one of them is closed or garbage-collected. Keep a receiver referenced while
+    it is in use.
 
     If `include_events=True` is passed to `new_receiver`, the receiver will
     also get state change messages (`StreamStarted`, `StreamRetrying`,
@@ -213,20 +230,28 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
         self._stream_method = stream_method
         self._transform = transform
         self._retry_strategy = (
-            retry.LinearBackoff() if retry_strategy is None else retry_strategy.copy()
+            retry.LinearBackoff() if retry_strategy is None else retry_strategy
         )
         self._retry_on_exhausted_stream = retry_on_exhausted_stream
         self._idle_timeout = idle_timeout
+        self._stop_requested = False
+        self._runs: set[_Run[OutputT]] = set()
+        self._current_run = self._start_run()
 
-        # Channel for transformed data messages (OutputT)
-        self._data_channel: channels.Broadcast[OutputT] = channels.Broadcast(
-            name=f"GrpcStreamBroadcaster-{stream_name}-Data"
+    def _start_run(self) -> "_Run[OutputT]":
+        """Start streaming with new channels and a fresh retry strategy.
+
+        Returns:
+            The new run.
+        """
+        run = _Run[OutputT](
+            f"GrpcStreamBroadcaster-{self._stream_name}",
+            self._retry_strategy.copy(),
+            asyncio.get_running_loop(),
         )
-
-        # Channel for stream events (StreamEvent), created on demand
-        self._event_channel: channels.Broadcast[StreamEvent] | None = None
-        self._event_sender: channels.Sender[StreamEvent] | None = None
-        self._task = asyncio.create_task(self._run())
+        run.task = asyncio.create_task(self._run(run))
+        self._runs = {r for r in self._runs if not r.task.done()} | {run}
+        return run
 
     @overload
     def new_receiver(
@@ -246,7 +271,8 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
         include_events: bool,
     ) -> channels.Receiver[StreamEvent | OutputT]: ...
 
-    def new_receiver(
+    # `pydoclint` counts the `raise` that passes on an error of `subscribe()`.
+    def new_receiver(  # noqa: DOC501, DOC503
         self,
         *,
         maxsize: int = 50,
@@ -254,6 +280,8 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
         include_events: bool = False,
     ) -> channels.Receiver[StreamEvent | OutputT]:
         """Create a new receiver for the stream.
+
+        If the stream has stopped, the receiver ends at once without data.
 
         Args:
             maxsize: The maximum number of messages to buffer in underlying receivers.
@@ -267,68 +295,87 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
             A new receiver. If `include_events` is True, the receiver will yield
             both `OutputT` and `StreamEvent` types. Otherwise, only `OutputT`.
         """
-        if not include_events:
-            return self._data_channel.new_receiver(
-                limit=maxsize, warn_on_overflow=warn_on_overflow
-            )
+        run = self._current_run
+        # Count the receiver before subscribing: a garbage collection while
+        # subscribing could otherwise release the run's last receiver and stop
+        # the run under the new one.
+        release = run.receiver_counter.acquire()
 
-        if self._event_channel is None:
+        if include_events and run.event_sender is None and not run.closed:
             _logger.debug(
                 "%s: First request for events, creating event channel.",
                 self._stream_name,
             )
-            self._event_channel = channels.Broadcast[StreamEvent](
-                name=f"GrpcStreamBroadcaster-{self._stream_name}-Events"
-            )
-            self._event_sender = self._event_channel.new_sender()
-
-        data_rx = self._data_channel.new_receiver(
-            limit=maxsize, warn_on_overflow=warn_on_overflow
-        )
-        event_rx = self._event_channel.new_receiver(
-            limit=maxsize, warn_on_overflow=warn_on_overflow
-        )
-        return channels.merge(data_rx, event_rx)
+        try:
+            receiver = run.subscribe(maxsize, warn_on_overflow, include_events)
+        except BaseException:
+            release()
+            raise
+        return _TrackedReceiver(receiver, release)
 
     @property
     def is_running(self) -> bool:
         """Return whether the streaming helper is running.
 
+        This is False after `stop()`, and once the stream has ended, given up or
+        failed. It is also False once every receiver handed out was closed or
+        garbage-collected.
+
         Returns:
             Whether the streaming helper is running.
         """
-        return not self._task.done()
+        run = self._current_run
+        return not (run.task.done() or run.receivers_gone)
 
     async def stop(self) -> None:
         """Stop the streaming helper."""
         _logger.info("%s: stopping the stream", self._stream_name)
-        if self._task.done():
-            return
-        self._task.cancel()
+        self._stop_requested = True
+        tasks = [run.task for run in self._runs if not run.task.done()]
+        for task in tasks:
+            task.cancel()
         try:
-            await self._task
-        except asyncio.CancelledError:
-            pass
-        await self._data_channel.aclose()
-        if self._event_channel is not None:
-            await self._event_channel.aclose()
+            # Collects the runs' cancellations; a cancellation of the caller still
+            # propagates.
+            await asyncio.gather(*tasks, return_exceptions=True)
+        finally:
+            # A run cancelled before its first step never closes its own channels.
+            for run in self._runs:
+                await run.close()
 
-    async def _run(self) -> None:
-        """Run the streaming helper."""
-        data_sender = self._data_channel.new_sender()
+    async def _run(self, run: "_Run[OutputT]") -> None:
+        """Run the stream until it ends, gives up, fails or is cancelled.
 
+        Args:
+            run: The run to stream for.
+        """
+        try:
+            await self._stream(run)
+        except Exception as err:  # pylint: disable=broad-exception-caught
+            _logger.exception("%s: unexpected error, stopping", self._stream_name)
+            await run.send_event(StreamFatalError(err))
+        finally:
+            if run.receivers_gone:
+                _logger.info("%s: all receivers are gone, stopping", self._stream_name)
+            await run.close()
+
+    async def _stream(self, run: "_Run[OutputT]") -> None:
+        """Stream, retrying according to the retry strategy.
+
+        Args:
+            run: The run to stream for.
+        """
         while True:
             error: Exception | None = None
             _logger.info("%s: starting to stream", self._stream_name)
             try:
                 call = self._stream_method()
 
-                if self._event_sender:
-                    await self._event_sender.send(StreamStarted())
+                await run.send_event(StreamStarted())
 
                 async with contextlib.aclosing(self._call_messages(call)) as messages:
                     async for msg in messages:
-                        self._retry_strategy.reset()
+                        run.retry_strategy.reset()
                         try:
                             transformed = self._transform(msg)
                         except Exception:  # pylint: disable=broad-exception-caught
@@ -339,47 +386,40 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
                             )
                             continue
 
-                        await data_sender.send(transformed)
+                        await run.data_sender.send(transformed)
 
             except (grpc.aio.AioRpcError, StreamIdleTimeoutError) as err:
                 error = err
 
+            if run.receivers_gone:
+                return
             if error is None and not self._retry_on_exhausted_stream:
                 _logger.info(
                     "%s: connection closed, stream exhausted", self._stream_name
                 )
-                await self._data_channel.aclose()
-                if self._event_channel is not None:
-                    await self._event_channel.aclose()
-                break
+                return
 
-            interval = self._retry_strategy.next_interval()
+            interval = run.retry_strategy.next_interval()
             error_str = f"Error: {error}" if error else "Stream exhausted"
             if interval is None:
                 _logger.error(
                     "%s: connection ended, retry limit exceeded (%s), giving up. %s.",
                     self._stream_name,
-                    self._retry_strategy.get_progress(),
+                    run.retry_strategy.get_progress(),
                     error_str,
                 )
-                if error is not None and self._event_sender:
-                    await self._event_sender.send(StreamFatalError(error))
-                await self._data_channel.aclose()
-                if self._event_channel is not None:
-                    await self._event_channel.aclose()
-                break
+                if error is not None:
+                    await run.send_event(StreamFatalError(error))
+                return
             _logger.warning(
                 "%s: connection ended, retrying %s in %0.3f seconds. %s.",
                 self._stream_name,
-                self._retry_strategy.get_progress(),
+                run.retry_strategy.get_progress(),
                 interval,
                 error_str,
             )
 
-            if self._event_sender:
-                await self._event_sender.send(
-                    StreamRetrying(timedelta(seconds=interval), error)
-                )
+            await run.send_event(StreamRetrying(timedelta(seconds=interval), error))
             await asyncio.sleep(interval)
 
     async def _call_messages(
@@ -440,3 +480,200 @@ def _cancel_call(call: object) -> None:
     cancel = getattr(call, "cancel", None)
     if callable(cancel):
         cancel()
+
+
+# pylint: disable-next=too-many-instance-attributes
+class _Run(Generic[OutputT]):
+    """The channels, receiver counter and task of one run of a broadcaster's stream."""
+
+    def __init__(
+        self,
+        name: str,
+        retry_strategy: retry.Strategy,
+        loop: asyncio.AbstractEventLoop,
+    ) -> None:
+        """Initialize the run.
+
+        Args:
+            name: The name prefix for the run's channels.
+            retry_strategy: The retry strategy of this run.
+            loop: The event loop the run streams on.
+        """
+        self._name = name
+        self.retry_strategy = retry_strategy
+        """The retry strategy of this run."""
+        self._data_channel = channels.Broadcast[OutputT](name=f"{name}-Data")
+        self.data_sender = self._data_channel.new_sender()
+        """The sender of the data channel."""
+        self._event_channel: channels.Broadcast[StreamEvent] | None = None
+        self.event_sender: channels.Sender[StreamEvent] | None = None
+        """The sender of the event channel, created on demand."""
+        self.receiver_counter = _ReceiverCounter(self._on_receivers_gone, loop)
+        """Counts the receivers handed out for this run."""
+        self.receivers_gone = False
+        """Whether every receiver was closed or dropped, which stops the run."""
+        self.task: asyncio.Task[None]
+        """The task streaming for this run."""
+
+    def _on_receivers_gone(self) -> None:
+        """Stop streaming, as every receiver handed out was closed or dropped."""
+        if self.task.done() or self.receivers_gone:
+            return
+        self.receivers_gone = True
+        self.task.cancel()
+
+    def subscribe(
+        self, maxsize: int, warn_on_overflow: bool, include_events: bool
+    ) -> channels.Receiver[StreamEvent | OutputT]:
+        """Create a receiver for the run's data, and its events if asked.
+
+        Once the run is closed, only the data receiver is returned, and it ends at
+        once.
+
+        Args:
+            maxsize: The maximum number of messages to buffer per channel.
+            warn_on_overflow: Whether to log a warning when a message is dropped.
+            include_events: Whether to also receive the stream events.
+
+        Returns:
+            The new receiver.
+        """
+        data_rx = self._data_channel.new_receiver(
+            limit=maxsize, warn_on_overflow=warn_on_overflow
+        )
+        # An event channel created after `close()` would never be closed.
+        if not include_events or self.closed:
+            return data_rx
+        if self._event_channel is None:
+            self._event_channel = channels.Broadcast[StreamEvent](
+                name=f"{self._name}-Events"
+            )
+            self.event_sender = self._event_channel.new_sender()
+        event_rx = self._event_channel.new_receiver(
+            limit=maxsize, warn_on_overflow=warn_on_overflow
+        )
+        return channels.merge(data_rx, event_rx)
+
+    @property
+    def closed(self) -> bool:
+        """Whether the run's channels were closed."""
+        return self._data_channel.is_closed
+
+    async def send_event(self, event: StreamEvent) -> None:
+        """Send an event to the event receivers, if there are any.
+
+        Args:
+            event: The event to send.
+        """
+        if self.event_sender is not None:
+            await self.event_sender.send(event)
+
+    async def close(self) -> None:
+        """Close the channels, which ends the receivers."""
+        await self._data_channel.aclose()
+        if self._event_channel is not None:
+            await self._event_channel.aclose()
+
+
+class _ReceiverCounter:
+    """Counts the receivers handed out that are not yet closed or dropped."""
+
+    def __init__(
+        self, on_all_gone: Callable[[], None], loop: asyncio.AbstractEventLoop
+    ) -> None:
+        """Initialize the counter.
+
+        Args:
+            on_all_gone: A bound method to call, on `loop`, when the last receiver
+                is gone. It is held weakly, so receivers do not keep its object
+                alive.
+            loop: The event loop to count on.
+        """
+        self._on_all_gone = weakref.WeakMethod(on_all_gone)
+        self._loop = loop
+        self._open = 0
+
+    def acquire(self) -> Callable[[], None]:
+        """Count a new receiver.
+
+        Returns:
+            The function to call, once and from any thread, when the receiver is
+                gone.
+        """
+        self._open += 1
+        return functools.partial(_call_on_loop, self._loop, self._release)
+
+    def _release(self) -> None:
+        """Count a receiver as gone."""
+        self._open -= 1
+        on_all_gone = self._on_all_gone()
+        if self._open == 0 and on_all_gone is not None:
+            on_all_gone()
+
+
+class _TrackedReceiver(channels.Receiver[_T]):
+    """A receiver that reports when it is closed or garbage-collected."""
+
+    def __init__(self, receiver: channels.Receiver[_T], release: Callable[[], None]):
+        """Initialize the receiver.
+
+        Args:
+            receiver: The receiver to wrap.
+            release: The function to call once the receiver is closed or dropped.
+        """
+        self._receiver = receiver
+        self._release = weakref.finalize(self, release)
+        # typeshed gives `finalize` empty `__slots__`, so mypy rejects this.
+        self._release.atexit = False  # type: ignore[misc]
+
+    async def ready(self) -> bool:
+        """Wait until a message is ready.
+
+        Returns:
+            Whether a message is ready; False once the receiver has stopped.
+        """
+        return await self._receiver.ready()
+
+    def consume(self) -> _T:
+        """Return the message that is ready.
+
+        Returns:
+            The message.
+        """
+        return self._receiver.consume()
+
+    def close(self) -> None:
+        """Close the receiver."""
+        try:
+            self._receiver.close()
+        finally:
+            self._release()
+
+    def __str__(self) -> str:
+        """Return a string representation of the wrapped receiver."""
+        return str(self._receiver)
+
+    def __repr__(self) -> str:
+        """Return a representation of the wrapped receiver."""
+        return repr(self._receiver)
+
+
+def _call_on_loop(loop: asyncio.AbstractEventLoop, func: Callable[[], None]) -> None:
+    """Call a function on an event loop, from any thread.
+
+    The call is immediate when made from the loop itself, and is dropped when the
+    loop is already closed.
+
+    Args:
+        loop: The event loop to call the function on.
+        func: The function to call.
+    """
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if running is loop:
+        func()
+        return
+    with contextlib.suppress(RuntimeError):  # The loop is closed.
+        loop.call_soon_threadsafe(func)

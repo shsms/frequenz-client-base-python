@@ -4,7 +4,10 @@
 """Tests for GrpcStreamBroadcaster class."""
 
 import asyncio
+import gc
+import itertools
 import logging
+import threading
 from collections.abc import AsyncIterator, Callable
 from contextlib import AsyncExitStack
 from datetime import timedelta
@@ -14,7 +17,7 @@ from unittest import mock
 import grpc
 import grpc.aio
 import pytest
-from frequenz.channels import Receiver
+from frequenz.channels import Receiver, ReceiverStoppedError
 
 from frequenz.client.base import retry, streaming
 from frequenz.client.base.streaming import (
@@ -452,6 +455,69 @@ async def _slow_stream() -> AsyncIterator[int]:
         yield i
 
 
+async def _endless_stream() -> AsyncIterator[int]:
+    """Yield a message every 10 ms, forever."""
+    for i in itertools.count():
+        yield i
+        await asyncio.sleep(0.01)
+
+
+def _collect_garbage_before(
+    monkeypatch: pytest.MonkeyPatch, cls: type, name: str
+) -> None:
+    """Make `cls.name` run a full garbage collection before it does its work."""
+    original = getattr(cls, name)
+
+    def collecting(*args: Any, **kwargs: Any) -> Any:
+        gc.collect()
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cls, name, collecting)
+
+
+def _drop_in_a_cycle(receiver: Any) -> None:
+    """Drop a receiver so that only a garbage collection can free it."""
+    cycle: list[Any] = [receiver]
+    cycle.append(cycle)
+
+
+class _SlowToCancel(_HangingCall):
+    """A call that takes 0.1 s to clean up when it is cancelled."""
+
+    def __init__(self, cleanups: list[str], finished: asyncio.Event) -> None:
+        super().__init__()
+        self._cleanups = cleanups
+        self._finished = finished
+
+    async def __anext__(self) -> int:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            try:
+                await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                self._cleanups.append("interrupted")
+                raise
+            finally:
+                self._finished.set()
+            self._cleanups.append("done")
+            raise
+        raise AssertionError("unreachable")
+
+
+class _AlwaysFailing:
+    """Stream method whose calls always fail, counting how often it is called."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self._ready_event = asyncio.Event()
+        self._ready_event.set()
+
+    def __call__(self) -> AsyncIterator[int]:
+        self.calls += 1
+        return _ErroringAsyncIter(make_error(), self._ready_event)
+
+
 def _helper(
     stream_method: Callable[[], AsyncIterator[int]], **kwargs: Any
 ) -> streaming.GrpcStreamBroadcaster[int, str]:
@@ -546,3 +612,342 @@ def test_idle_timeout_must_be_positive() -> None:
     for idle_timeout in (timedelta(0), timedelta(seconds=-1)):
         with pytest.raises(ValueError, match="idle_timeout"):
             _helper(_HangingCall, idle_timeout=idle_timeout)
+
+
+async def test_stops_when_all_receivers_closed_while_retrying() -> None:
+    """A retrying stream stops once its only receiver is closed."""
+    stream_method = _AlwaysFailing()
+    helper = _helper(
+        stream_method,
+        retry_strategy=retry.LinearBackoff(limit=None, interval=0.01, jitter=0.0),
+    )
+    try:
+        receiver = helper.new_receiver()
+        await asyncio.sleep(0.05)
+        receiver.close()
+        await asyncio.sleep(0.05)
+        assert not helper.is_running
+        calls = stream_method.calls
+        await asyncio.sleep(0.05)
+        assert stream_method.calls == calls
+    finally:
+        await asyncio.wait_for(helper.stop(), timeout=5)
+
+
+async def test_stops_when_all_receivers_closed_while_stalled() -> None:
+    """A stalled stream stops and cancels its call once its receiver is closed."""
+    call = _HangingCall()
+    helper = _helper(lambda: call)
+    try:
+        receiver = helper.new_receiver()
+        await asyncio.sleep(0.01)
+        receiver.close()
+        assert not helper.is_running
+        await asyncio.sleep(0.05)
+        assert call.cancelled == 1
+    finally:
+        await asyncio.wait_for(helper.stop(), timeout=5)
+
+
+async def test_stops_when_receiver_is_garbage_collected() -> None:
+    """A retrying stream stops once its only receiver is dropped."""
+    helper = _helper(
+        _AlwaysFailing(),
+        retry_strategy=retry.LinearBackoff(limit=None, interval=0.01, jitter=0.0),
+    )
+    try:
+        receiver = helper.new_receiver()
+        del receiver
+        gc.collect()
+        await asyncio.sleep(0.05)
+        assert not helper.is_running
+    finally:
+        await asyncio.wait_for(helper.stop(), timeout=5)
+
+
+async def test_stops_when_events_receiver_is_garbage_collected() -> None:
+    """A stalled stream stops once its only receiver, with events, is dropped."""
+    call = _HangingCall()
+    helper = _helper(lambda: call)
+    try:
+        receiver = helper.new_receiver(include_events=True)
+        await asyncio.sleep(0.01)
+        del receiver
+        gc.collect()
+        await asyncio.sleep(0.05)
+        assert not helper.is_running
+        assert call.cancelled == 1
+    finally:
+        await asyncio.wait_for(helper.stop(), timeout=5)
+
+
+async def test_keeps_running_while_a_receiver_is_open(
+    no_retry: mock.MagicMock,  # pylint: disable=redefined-outer-name
+) -> None:
+    """Closing one receiver leaves the stream running for the others."""
+    helper = _helper(_slow_stream, retry_strategy=no_retry)
+    async with AsyncExitStack() as stack:
+        stack.push_async_callback(helper.stop)
+        closed = helper.new_receiver()
+        kept = helper.new_receiver()
+        closed.close()
+        first = await asyncio.wait_for(kept.receive(), timeout=5)
+        assert helper.is_running
+        rest, _ = await asyncio.wait_for(_split_message(kept), timeout=5)
+
+    assert [first, *rest] == [f"transformed_{i}" for i in range(5)]
+
+
+async def test_events_receiver_keeps_the_stream_running() -> None:
+    """A receiver with events keeps the stream alive until it is closed."""
+    helper = _helper(_HangingCall)
+    try:
+        receiver = helper.new_receiver(include_events=True)
+        await asyncio.sleep(0.05)
+        assert helper.is_running
+        receiver.close()
+        await asyncio.sleep(0.05)
+        assert not helper.is_running
+    finally:
+        await asyncio.wait_for(helper.stop(), timeout=5)
+
+
+@pytest.mark.parametrize("include_events", [False, True])
+async def test_new_receiver_after_stop_is_stopped(include_events: bool) -> None:
+    """After stop(), a new receiver ends without data."""
+    helper = _helper(_HangingCall)
+    await helper.stop()
+    receiver = helper.new_receiver(include_events=include_events)
+    assert not helper.is_running
+    assert await asyncio.wait_for(_split_message(receiver), timeout=5) == ([], [])
+
+
+async def test_closing_events_receiver_keeps_data_flowing(
+    no_retry: mock.MagicMock,  # pylint: disable=redefined-outer-name
+) -> None:
+    """Closing the only receiver with events does not stop the data receivers."""
+    helper = _helper(_slow_stream, retry_strategy=no_retry)
+    async with AsyncExitStack() as stack:
+        stack.push_async_callback(helper.stop)
+        events = helper.new_receiver(include_events=True)
+        data = helper.new_receiver()
+        events.close()
+        items = await asyncio.wait_for(_split_message(data), timeout=5)
+
+    assert items == ([f"transformed_{i}" for i in range(5)], [])
+
+
+async def test_messages_before_the_first_receiver_do_not_stop_the_stream() -> None:
+    """Messages sent before any receiver exists do not stop the stream."""
+    calls: list[int] = []
+    sent = asyncio.Event()
+
+    async def stream() -> AsyncIterator[int]:
+        calls.append(len(calls))
+        yield 0
+        sent.set()
+        await asyncio.sleep(0.01)
+        yield 1
+        await asyncio.Event().wait()
+
+    helper = _helper(stream)
+    try:
+        await asyncio.wait_for(sent.wait(), timeout=5)
+        receiver = helper.new_receiver()
+        assert await asyncio.wait_for(receiver.receive(), timeout=5) == "transformed_1"
+        assert calls == [0]
+    finally:
+        await asyncio.wait_for(helper.stop(), timeout=5)
+
+
+async def test_unexpected_error_ends_the_receivers() -> None:
+    """An unexpected error from the call ends the receivers instead of hanging them."""
+
+    async def stream() -> AsyncIterator[int]:
+        yield 1
+        raise ValueError("unexpected")
+
+    helper = _helper(stream)
+    receiver = helper.new_receiver(include_events=True)
+    items, events = await asyncio.wait_for(_split_message(receiver), timeout=5)
+    assert items == ["transformed_1"]
+    assert [type(e) for e in events] == [StreamStarted, StreamFatalError]
+    assert isinstance(events[1], StreamFatalError)
+    assert isinstance(events[1].exception, ValueError)
+    await helper.stop()
+
+
+async def test_receiver_dropped_in_another_thread() -> None:
+    """A receiver collected in another thread stops the stream on the loop."""
+    call = _HangingCall()
+    helper = _helper(lambda: call)
+    try:
+        holder = [helper.new_receiver()]
+        await asyncio.sleep(0.01)
+        thread = threading.Thread(target=holder.clear)
+        thread.start()
+        thread.join()
+        await asyncio.wait_for(_wait_until_stopped(helper), timeout=5)
+        assert call.cancelled == 1
+    finally:
+        await asyncio.wait_for(helper.stop(), timeout=5)
+
+
+async def _wait_until_stopped(
+    helper: streaming.GrpcStreamBroadcaster[int, str],
+) -> None:
+    """Wait until the broadcaster is no longer running."""
+    while helper.is_running:
+        await asyncio.sleep(0.01)
+
+
+async def test_stop_before_the_stream_started() -> None:
+    """A receiver handed out right before stop() ends instead of hanging."""
+    helper = _helper(_HangingCall)
+    receiver = helper.new_receiver()
+    await helper.stop()
+    assert await asyncio.wait_for(_split_message(receiver), timeout=5) == ([], [])
+
+
+async def test_garbage_collection_while_subscribing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A receiver collected while a new one subscribes does not end the new one."""
+    helper = _helper(_endless_stream)
+    gc.disable()
+    try:
+        first = helper.new_receiver()
+        await asyncio.wait_for(first.receive(), timeout=5)
+        _drop_in_a_cycle(first)
+        del first
+        _collect_garbage_before(
+            monkeypatch, streaming._Run, "subscribe"  # pylint: disable=protected-access
+        )
+        second = helper.new_receiver()
+        await asyncio.wait_for(second.receive(), timeout=5)
+        assert helper.is_running
+    finally:
+        gc.enable()
+        await asyncio.wait_for(helper.stop(), timeout=5)
+
+
+async def test_closed_receiver_stops_while_others_continue() -> None:
+    """A closed receiver ends even while the stream keeps running for others."""
+    helper = _helper(_endless_stream)
+    try:
+        closed = helper.new_receiver()
+        kept = helper.new_receiver()
+        await asyncio.wait_for(kept.receive(), timeout=5)
+        closed.close()
+        with pytest.raises(ReceiverStoppedError):
+            await asyncio.wait_for(closed.receive(), timeout=5)
+        await asyncio.wait_for(kept.receive(), timeout=5)
+        assert helper.is_running
+    finally:
+        await asyncio.wait_for(helper.stop(), timeout=5)
+
+
+async def test_call_timeout_error_is_not_an_idle_timeout() -> None:
+    """A TimeoutError raised by the call is a failure, not an idle timeout."""
+    calls = 0
+
+    async def stream() -> AsyncIterator[int]:
+        nonlocal calls
+        calls += 1
+        raise TimeoutError("from the call")
+        yield 0  # pylint: disable=unreachable
+
+    helper = _helper(stream, idle_timeout=timedelta(seconds=10))
+    try:
+        receiver = helper.new_receiver(include_events=True)
+        _, events = await asyncio.wait_for(_split_message(receiver), timeout=5)
+        assert [type(e) for e in events] == [StreamStarted, StreamFatalError]
+        assert isinstance(events[1], StreamFatalError)
+        # pylint: disable-next=unidiomatic-typecheck
+        assert type(events[1].exception) is TimeoutError
+        assert calls == 1
+    finally:
+        await asyncio.wait_for(helper.stop(), timeout=5)
+
+
+async def test_stop_does_not_swallow_the_callers_cancellation() -> None:
+    """Cancelling the task that awaits stop() cancels it."""
+    helper = _helper(lambda: _SlowToCancel([], asyncio.Event()))
+    receiver = helper.new_receiver()
+    await asyncio.sleep(0.01)
+    stopper = asyncio.create_task(helper.stop())
+    await asyncio.sleep(0.01)
+    stopper.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await stopper
+    assert await asyncio.wait_for(_split_message(receiver), timeout=5) == ([], [])
+
+
+async def test_stop_closes_receivers_when_its_caller_is_cancelled() -> None:
+    """A cancelled stop() still ends the receivers of a run that never started."""
+    receivers: list[Receiver[str]] = []
+
+    async def make_and_stop() -> None:
+        helper = _helper(_HangingCall)
+        receivers.append(helper.new_receiver())
+        await helper.stop()
+
+    stopper = asyncio.create_task(make_and_stop())
+    await asyncio.sleep(0)
+    stopper.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await stopper
+    assert await asyncio.wait_for(_split_message(receivers[0]), timeout=5) == (
+        [],
+        [],
+    )
+
+
+async def test_closing_a_receiver_twice_counts_it_once() -> None:
+    """A receiver closed twice, then collected, leaves the others running."""
+    helper = _helper(_endless_stream)
+    try:
+        closed = helper.new_receiver()
+        kept = helper.new_receiver()
+        await asyncio.wait_for(kept.receive(), timeout=5)
+        closed.close()
+        closed.close()
+        del closed
+        gc.collect()
+        await asyncio.sleep(0.02)
+        assert helper.is_running
+        await asyncio.wait_for(kept.receive(), timeout=5)
+    finally:
+        await asyncio.wait_for(helper.stop(), timeout=5)
+
+
+async def test_failed_new_receiver_is_not_counted() -> None:
+    """A new_receiver() call that raises does not keep the stream running."""
+    helper = _helper(_HangingCall)
+    try:
+        receiver = helper.new_receiver()
+        with pytest.raises(ValueError):
+            helper.new_receiver(maxsize=-1)
+        receiver.close()
+        assert not helper.is_running
+    finally:
+        await asyncio.wait_for(helper.stop(), timeout=5)
+
+
+async def test_failed_close_still_counts_the_receiver_as_gone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A receiver whose close() raises no longer keeps the stream running."""
+
+    def failing_close() -> None:
+        raise RuntimeError("close failed")
+
+    helper = _helper(_HangingCall)
+    try:
+        receiver = helper.new_receiver()
+        monkeypatch.setattr(getattr(receiver, "_receiver"), "close", failing_close)
+        with pytest.raises(RuntimeError, match="close failed"):
+            receiver.close()
+        assert not helper.is_running
+    finally:
+        await asyncio.wait_for(helper.stop(), timeout=5)
