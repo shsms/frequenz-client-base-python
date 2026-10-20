@@ -382,16 +382,17 @@ async def test_messages_on_retry(
     receiver_ready_event: asyncio.Event,  # pylint: disable=redefined-outer-name
     include_events: bool,
 ) -> None:
-    """Test that messages are sent on retry."""
+    """Test that messages are sent on retry, and reset the retry count."""
     # We need to use a specific instance for all the test here because 2 errors created
     # with the same arguments don't compare equal (grpc.aio.AioRpcError doesn't seem to
     # provide a __eq__ method).
     error = make_error()
+    successes = [2, 2, 0]
 
     helper = streaming.GrpcStreamBroadcaster(
         stream_name="test_helper",
         stream_method=lambda: _ErroringAsyncIter(
-            error, receiver_ready_event, num_successes=2
+            error, receiver_ready_event, num_successes=successes.pop(0)
         ),
         transform=_transformer,
         retry_strategy=retry.LinearBackoff(limit=1, interval=0.0, jitter=0.0),
@@ -413,8 +414,11 @@ async def test_messages_on_retry(
         "transformed_0",
         "transformed_1",
     ]
+    assert not successes
     if include_events:
         assert events == [
+            StreamStarted(),
+            StreamRetrying(timedelta(seconds=0.0), error),
             StreamStarted(),
             StreamRetrying(timedelta(seconds=0.0), error),
             StreamStarted(),

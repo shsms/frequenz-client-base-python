@@ -170,6 +170,11 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
             transform: A function to transform the input type to the output type.
             retry_strategy: The retry strategy to use, when the connection is lost. Defaults
                 to retries every 3 seconds, with a jitter of 1 second, indefinitely.
+                The retry count is reset when a message arrives, so a limit counts
+                the retries in a row that receive no message. So a limit above 0
+                never stops a stream that receives a message on every
+                connection. With `ExponentialBackoff`, the wait also starts again
+                from its initial interval.
             retry_on_exhausted_stream: Whether to retry when the stream is exhausted, i.e.
                 when the server closes the stream. Defaults to False.
         """
@@ -290,6 +295,7 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
                     await self._event_sender.send(StreamStarted())
 
                 async for msg in call:
+                    self._retry_strategy.reset()
                     try:
                         transformed = self._transform(msg)
                     except Exception:  # pylint: disable=broad-exception-caught
