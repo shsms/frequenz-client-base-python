@@ -290,8 +290,9 @@ class StreamingGreeterApiClient(BaseApiClient[hsw_pb2_grpc.MultiGreeterStub]):
     def say_hello_stream(self, name: str, *, buffer_size: int = 50) -> Receiver[str]:
         """Stream greetings from the server.
 
-        This method reuses the underlying stream if called multiple times with the
-        same name.
+        This method reuses the stream for the same name. If every receiver of
+        that stream was closed, the next call starts the stream again. A stream
+        that has ended is not started again.
 
         Args:
             name: The name to greet.

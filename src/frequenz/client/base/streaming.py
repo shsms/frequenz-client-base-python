@@ -106,8 +106,9 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
     messages.
 
     Once receivers were handed out, the stream also stops by itself when every
-    one of them is closed or garbage-collected. Keep a receiver referenced while
-    it is in use.
+    one of them is closed or garbage-collected, and a later `new_receiver()`
+    call starts it again, unless `stop()` was called. Keep a receiver referenced
+    while it is in use.
 
     If `include_events=True` is passed to `new_receiver`, the receiver will
     also get state change messages (`StreamStarted`, `StreamRetrying`,
@@ -281,7 +282,10 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
     ) -> channels.Receiver[StreamEvent | OutputT]:
         """Create a new receiver for the stream.
 
-        If the stream has stopped, the receiver ends at once without data.
+        If the stream stopped because every earlier receiver was closed or
+        garbage-collected, it is started again, unless `stop()` was called.
+        Otherwise, if the stream has ended, given up or failed, or `stop()` was
+        called, the receiver ends at once without data.
 
         Args:
             maxsize: The maximum number of messages to buffer in underlying receivers.
@@ -300,6 +304,11 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
         # subscribing could otherwise release the run's last receiver and stop
         # the run under the new one.
         release = run.receiver_counter.acquire()
+        if run.receivers_gone and not run.ended and not self._stop_requested:
+            release()
+            _logger.info("%s: restarting for a new receiver", self._stream_name)
+            run = self._current_run = self._start_run()
+            release = run.receiver_counter.acquire()
 
         if include_events and run.event_sender is None and not run.closed:
             _logger.debug(
@@ -319,7 +328,7 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
 
         This is False after `stop()`, and once the stream has ended, given up or
         failed. It is also False once every receiver handed out was closed or
-        garbage-collected.
+        garbage-collected, until `new_receiver()` starts the stream again.
 
         Returns:
             Whether the streaming helper is running.
@@ -352,6 +361,11 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
         try:
             await self._stream(run)
         except Exception as err:  # pylint: disable=broad-exception-caught
+            # Once every receiver is gone, the run is being cancelled. An error
+            # now, e.g. from the call's cleanup, does not mark the run as ended,
+            # so a new receiver can restart it.
+            if not run.receivers_gone:
+                run.ended = True
             _logger.exception("%s: unexpected error, stopping", self._stream_name)
             await run.send_event(StreamFatalError(err))
         finally:
@@ -394,6 +408,7 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
             if run.receivers_gone:
                 return
             if error is None and not self._retry_on_exhausted_stream:
+                run.ended = True
                 _logger.info(
                     "%s: connection closed, stream exhausted", self._stream_name
                 )
@@ -402,6 +417,7 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
             interval = run.retry_strategy.next_interval()
             error_str = f"Error: {error}" if error else "Stream exhausted"
             if interval is None:
+                run.ended = True
                 _logger.error(
                     "%s: connection ended, retry limit exceeded (%s), giving up. %s.",
                     self._stream_name,
@@ -484,7 +500,14 @@ def _cancel_call(call: object) -> None:
 
 # pylint: disable-next=too-many-instance-attributes
 class _Run(Generic[OutputT]):
-    """The channels, receiver counter and task of one run of a broadcaster's stream."""
+    """The channels, receiver counter and task of one run of a broadcaster's stream.
+
+    A broadcaster starts its first run when it is created. It starts a new run
+    when a receiver is requested after the current run stopped because every
+    receiver was gone, unless `stop()` was called or the run ended by itself.
+    Each run only closes its own channels, so a run that is still winding down
+    cannot end the next run's receivers.
+    """
 
     def __init__(
         self,
@@ -512,6 +535,12 @@ class _Run(Generic[OutputT]):
         """Counts the receivers handed out for this run."""
         self.receivers_gone = False
         """Whether every receiver was closed or dropped, which stops the run."""
+        self.ended = False
+        """Whether the stream ended, gave up or failed by itself.
+
+        Not set when the run stopped because every receiver was gone. A run
+        with this set is not restarted.
+        """
         self.task: asyncio.Task[None]
         """The task streaming for this run."""
 
