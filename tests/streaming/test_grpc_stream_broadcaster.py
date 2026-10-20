@@ -5,9 +5,10 @@
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import AsyncExitStack
 from datetime import timedelta
+from typing import Any
 from unittest import mock
 
 import grpc
@@ -426,3 +427,122 @@ async def test_messages_on_retry(
         ]
     else:
         assert events == []
+
+
+class _HangingCall(AsyncIterator[int]):
+    """Async iterator that never yields, like a server stream that stalls."""
+
+    def __init__(self) -> None:
+        self.cancelled = 0
+
+    async def __anext__(self) -> int:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    def cancel(self) -> bool:
+        """Record a cancellation, as a gRPC call would accept one."""
+        self.cancelled += 1
+        return True
+
+
+async def _slow_stream() -> AsyncIterator[int]:
+    """Yield 5 messages, 10 ms apart."""
+    for i in range(5):
+        await asyncio.sleep(0.01)
+        yield i
+
+
+def _helper(
+    stream_method: Callable[[], AsyncIterator[int]], **kwargs: Any
+) -> streaming.GrpcStreamBroadcaster[int, str]:
+    """Create a broadcaster for the tests below."""
+    return streaming.GrpcStreamBroadcaster(
+        stream_name="test_helper",
+        stream_method=stream_method,
+        transform=_transformer,
+        **kwargs,
+    )
+
+
+async def test_idle_timeout_retries_then_gives_up() -> None:
+    """A stalled stream is cancelled, retried, and given up after the limit."""
+    calls: list[_HangingCall] = []
+
+    def stream_method() -> _HangingCall:
+        calls.append(_HangingCall())
+        return calls[-1]
+
+    helper = _helper(
+        stream_method,
+        retry_strategy=retry.LinearBackoff(limit=1, interval=0.0, jitter=0.0),
+        idle_timeout=timedelta(seconds=0.05),
+    )
+    async with AsyncExitStack() as stack:
+        stack.push_async_callback(helper.stop)
+        receiver = helper.new_receiver(include_events=True)
+        items, events = await asyncio.wait_for(_split_message(receiver), timeout=5)
+
+    assert items == []
+    assert [type(e) for e in events] == [
+        StreamStarted,
+        StreamRetrying,
+        StreamStarted,
+        StreamFatalError,
+    ]
+    for event in (events[1], events[3]):
+        assert isinstance(event, (StreamRetrying, StreamFatalError))
+        assert isinstance(event.exception, streaming.StreamIdleTimeoutError)
+        assert event.exception.idle_timeout == timedelta(seconds=0.05)
+    assert [call.cancelled for call in calls] == [1, 1]
+
+
+async def test_idle_timeout_measures_gaps_between_messages(
+    no_retry: mock.MagicMock,  # pylint: disable=redefined-outer-name
+) -> None:
+    """A stream that keeps sending within the idle timeout is never cut off."""
+    helper = _helper(
+        _slow_stream, retry_strategy=no_retry, idle_timeout=timedelta(seconds=0.03)
+    )
+    async with AsyncExitStack() as stack:
+        stack.push_async_callback(helper.stop)
+        receiver = helper.new_receiver(include_events=True)
+        items, events = await asyncio.wait_for(_split_message(receiver), timeout=5)
+
+    assert items == [f"transformed_{i}" for i in range(5)]
+    assert events == [StreamStarted()]
+
+
+async def test_stop_during_idle_wait() -> None:
+    """Stopping while waiting for a message cancels the call cleanly."""
+    call = _HangingCall()
+    helper = _helper(lambda: call, idle_timeout=timedelta(seconds=10))
+    receiver = helper.new_receiver(include_events=True)
+    await asyncio.sleep(0.01)
+    await helper.stop()
+    items, events = await asyncio.wait_for(_split_message(receiver), timeout=5)
+
+    assert items == []
+    assert events == [StreamStarted()]
+    assert call.cancelled == 1
+    assert not helper.is_running
+
+
+async def test_no_idle_timeout_by_default() -> None:
+    """Without an idle timeout a silent stream is left waiting."""
+    call = _HangingCall()
+    helper = _helper(lambda: call)
+    try:
+        receiver = helper.new_receiver()
+        await asyncio.sleep(0.1)
+        assert helper.is_running
+        assert call.cancelled == 0
+        receiver.close()
+    finally:
+        await asyncio.wait_for(helper.stop(), timeout=5)
+
+
+def test_idle_timeout_must_be_positive() -> None:
+    """A zero or negative idle timeout is rejected."""
+    for idle_timeout in (timedelta(0), timedelta(seconds=-1)):
+        with pytest.raises(ValueError, match="idle_timeout"):
+            _helper(_HangingCall, idle_timeout=idle_timeout)

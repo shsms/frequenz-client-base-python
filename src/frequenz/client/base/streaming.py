@@ -4,8 +4,9 @@
 """Implementation of the grpc streaming helper."""
 
 import asyncio
+import contextlib
 import logging
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import AsyncIterable, Generic, Literal, TypeAlias, TypeVar, overload
@@ -52,6 +53,27 @@ class StreamFatalError:
 
     exception: Exception
     """The exception that caused the stream to stop."""
+
+
+class StreamIdleTimeoutError(TimeoutError):
+    """The stream received no message within its idle timeout.
+
+    It is not an `ApiClientError`, because the broadcaster does not know the
+    server URL.
+    """
+
+    def __init__(self, stream_name: str, idle_timeout: timedelta) -> None:
+        """Initialize the error.
+
+        Args:
+            stream_name: The name of the stream.
+            idle_timeout: The idle timeout that expired.
+        """
+        super().__init__(f"no message received for {idle_timeout}")
+        self.stream_name = stream_name
+        """The name of the stream."""
+        self.idle_timeout = idle_timeout
+        """The idle timeout that expired."""
 
 
 StreamEvent: TypeAlias = StreamStarted | StreamRetrying | StreamFatalError
@@ -160,6 +182,7 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
         transform: Callable[[InputT], OutputT],
         retry_strategy: retry.Strategy | None = None,
         retry_on_exhausted_stream: bool = False,
+        idle_timeout: timedelta | None = None,
     ):
         """Initialize the streaming helper.
 
@@ -177,7 +200,15 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
                 from its initial interval.
             retry_on_exhausted_stream: Whether to retry when the stream is exhausted, i.e.
                 when the server closes the stream. Defaults to False.
+            idle_timeout: If set, a call that receives no message for this long is
+                cancelled and handled like a failed call: it is retried according to
+                `retry_strategy`, with a `StreamIdleTimeoutError` as the error.
+
+        Raises:
+            ValueError: If `idle_timeout` is not positive.
         """
+        if idle_timeout is not None and idle_timeout <= timedelta(0):
+            raise ValueError(f"idle_timeout must be positive, not {idle_timeout}")
         self._stream_name = stream_name
         self._stream_method = stream_method
         self._transform = transform
@@ -185,6 +216,7 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
             retry.LinearBackoff() if retry_strategy is None else retry_strategy.copy()
         )
         self._retry_on_exhausted_stream = retry_on_exhausted_stream
+        self._idle_timeout = idle_timeout
 
         # Channel for transformed data messages (OutputT)
         self._data_channel: channels.Broadcast[OutputT] = channels.Broadcast(
@@ -294,21 +326,22 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
                 if self._event_sender:
                     await self._event_sender.send(StreamStarted())
 
-                async for msg in call:
-                    self._retry_strategy.reset()
-                    try:
-                        transformed = self._transform(msg)
-                    except Exception:  # pylint: disable=broad-exception-caught
-                        _logger.exception(
-                            "%s: error transforming message: %s",
-                            self._stream_name,
-                            msg,
-                        )
-                        continue
+                async with contextlib.aclosing(self._call_messages(call)) as messages:
+                    async for msg in messages:
+                        self._retry_strategy.reset()
+                        try:
+                            transformed = self._transform(msg)
+                        except Exception:  # pylint: disable=broad-exception-caught
+                            _logger.exception(
+                                "%s: error transforming message: %s",
+                                self._stream_name,
+                                msg,
+                            )
+                            continue
 
-                    await data_sender.send(transformed)
+                        await data_sender.send(transformed)
 
-            except grpc.aio.AioRpcError as err:
+            except (grpc.aio.AioRpcError, StreamIdleTimeoutError) as err:
                 error = err
 
             if error is None and not self._retry_on_exhausted_stream:
@@ -348,3 +381,62 @@ class GrpcStreamBroadcaster(Generic[InputT, OutputT]):
                     StreamRetrying(timedelta(seconds=interval), error)
                 )
             await asyncio.sleep(interval)
+
+    async def _call_messages(
+        self, call: AsyncIterable[InputT]
+    ) -> AsyncGenerator[InputT, None]:
+        """Yield the messages of a call, enforcing the idle timeout.
+
+        When this generator is closed before the call ends, e.g. on an idle
+        timeout or when the broadcaster is stopped, the call is cancelled if it
+        has a `cancel()` method. gRPC calls also cancel themselves when the
+        cancellation reaches them while they wait for a message.
+
+        Args:
+            call: The call returned by the stream method.
+
+        Yields:
+            The messages of the call.
+
+        Raises:
+            StreamIdleTimeoutError: If no message arrives within the idle timeout.
+            TimeoutError: If the call itself raises it.
+        """
+        idle_timeout = self._idle_timeout
+        exhausted = False
+        try:
+            if idle_timeout is None:
+                async for msg in call:
+                    yield msg
+                exhausted = True
+                return
+            iterator = aiter(call)
+            while True:
+                timer = asyncio.timeout(idle_timeout.total_seconds())
+                try:
+                    async with timer:
+                        msg = await anext(iterator)
+                except StopAsyncIteration:
+                    exhausted = True
+                    return
+                except TimeoutError as err:
+                    if not timer.expired():
+                        raise
+                    raise StreamIdleTimeoutError(
+                        self._stream_name, idle_timeout
+                    ) from err
+                yield msg
+        finally:
+            if not exhausted:
+                _cancel_call(call)
+
+
+def _cancel_call(call: object) -> None:
+    """Cancel a gRPC call, if the object supports it.
+
+    Args:
+        call: The object returned by the stream method.
+    """
+    cancel = getattr(call, "cancel", None)
+    if callable(cancel):
+        cancel()
